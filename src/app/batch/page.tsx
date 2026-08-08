@@ -316,8 +316,8 @@ export default function BatchPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20 selection:bg-indigo-100">
-      <div style={{background: 'blue', color: 'white', padding: '50px', fontSize: '40px', fontWeight: 'bold', textAlign: 'center'}}>
-        DEPLOYMENT VERSION: FRANK_V7_STABLE_V1
+      <div style={{background: '#22c55e', color: 'white', padding: '50px', fontSize: '40px', fontWeight: 'bold', textAlign: 'center'}}>
+        DEPLOYMENT VERSION: FRANK_V8_GEMINI_2.0_EXP
       </div>
       <Navbar mode="batch" onSettingsClick={() => setIsSettingsOpen(true)} />
 

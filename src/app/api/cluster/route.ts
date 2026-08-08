@@ -3,11 +3,22 @@ import { NextRequest, NextResponse } from "next/server";
 export async function POST(req: NextRequest) {
   try {
     const { images } = await req.json();
-    const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
+    const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
 
     if (!API_KEY) return NextResponse.json({ error: "API Key missing." }, { status: 500 });
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
+    }
+
+    // DIAGNOSTIC: Let's see what models this key can actually see
+    // This will show up in your Vercel Logs
+    try {
+      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
+      const listRes = await fetch(listUrl);
+      const listData = await listRes.json();
+      console.log("AVAILABLE MODELS:", JSON.stringify(listData));
+    } catch (e) {
+      console.error("Failed to list models:", e);
     }
 
     const parts: any[] = [];
@@ -37,8 +48,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // STABLE V1 ENDPOINT - NO 'v1beta'
-    const endpoint = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    // TRYING GEMINI 2.0 FLASH EXPERIMENTAL ON V1BETA
+    const modelName = "gemini-2.0-flash-exp";
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
     
     const response = await fetch(endpoint, {
       method: "POST",
@@ -50,10 +62,17 @@ export async function POST(req: NextRequest) {
     });
 
     const result = await response.json();
-    if (result.error) return NextResponse.json({ error: result.error.message, v: 7 }, { status: 400 });
+
+    if (result.error) {
+      return NextResponse.json({ 
+        error: result.error.message, 
+        suggestion: "Check Vercel logs for 'AVAILABLE MODELS' list.",
+        v: 8 
+      }, { status: 400 });
+    }
 
     if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return NextResponse.json({ error: "Empty AI response", v: 7 }, { status: 500 });
+      return NextResponse.json({ error: "Empty AI response", v: 8 }, { status: 500 });
     }
 
     const text = result.candidates[0].content.parts[0].text;
@@ -61,6 +80,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(parsed);
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message, v: 7 }, { status: 500 });
+    return NextResponse.json({ error: error.message, v: 8 }, { status: 500 });
   }
 }
