@@ -1,24 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "");
 
 export async function POST(req: NextRequest) {
   try {
     const { images } = await req.json();
-    const API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY;
-
     if (!images || !Array.isArray(images)) {
-      return NextResponse.json({ error: "No images provided" }, { status: 400 });
+      return NextResponse.json({ error: "No images" }, { status: 400 });
     }
 
-    if (!API_KEY) {
-      return NextResponse.json({ error: "API key missing" }, { status: 500 });
-    }
+    // Use 1.5-flash - it is the most stable for vision clustering
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // 1. Build the PARTS array (Text + all Images)
-    const parts: any[] = [
-      { text: "Cluster these images into distinct items. Return a JSON object with key 'clusters' containing an array of objects: { \"clusters\": [{ \"id\": \"1\", \"title\": \"Item Name\", \"photo_indices\": [0, 1] }] }" }
-    ];
-
-    for (const imgStr of images) {
+    // Build parts with EXTREME precision
+    const imageParts = await Promise.all(images.map(async (imgStr: string) => {
       let b64Data = "";
       let mimeType = "image/jpeg";
 
@@ -28,73 +24,43 @@ export async function POST(req: NextRequest) {
         b64Data = Buffer.from(buffer).toString("base64");
         mimeType = res.headers.get("content-type") || "image/jpeg";
       } else {
-        b64Data = imgStr.split(",")[1] || imgStr;
-        mimeType = imgStr.includes("image/png") ? "image/png" : "image/jpeg";
+        // Handle data:image/jpeg;base64,...
+        const split = imgStr.split(";base64,");
+        b64Data = split[1] || imgStr;
+        mimeType = split[0].split(":")[1] || "image/jpeg";
       }
 
-      parts.push({
-        inline_data: {
-          mime_type: mimeType,
-          data: b64Data
+      return {
+        inlineData: {
+          data: b64Data,
+          mimeType: mimeType
         }
-      });
-    }
+      };
+    }));
 
-    // 2. The Payload: ONE content object, ONE role, MANY parts.
-    const payload = {
-      contents: [
-        {
-          role: "user",
-          parts: parts
-        }
-      ],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
+    const promptPart = {
+      text: "Cluster these images into distinct items. Return ONLY a JSON array: [{\"id\": \"1\", \"title\": \"Item Name\", \"photo_indices\": [0, 1]}]"
     };
 
-    // 3. Use Gemini 2.0 Flash (with fallback to 1.5-flash)
-    let endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
-    
-    let response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+    // THE FIX: Explicitly define the content array with a single user role
+    const result = await model.generateContent({
+      contents: [{
+        role: "user",
+        parts: [promptPart, ...imageParts]
+      }],
+      generationConfig: {
+        responseMimeType: "application/json",
+      }
     });
 
-    let result = await response.json();
-
-    if (result.error && (result.error.code === 404 || result.error.status === "NOT_FOUND")) {
-      console.warn("gemini-2.0-flash-exp endpoint not found, falling back to gemini-1.5-flash");
-      endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-      result = await response.json();
-    }
-
-    if (result.error) {
-      console.error("Gemini API Error:", result.error);
-      return NextResponse.json({ error: result.error.message }, { status: 500 });
-    }
-
-    if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return NextResponse.json({ error: "Empty response from AI" }, { status: 500 });
-    }
-
-    const textResponse = result.candidates[0].content.parts[0].text;
-    const parsed = JSON.parse(textResponse);
-
-    if (Array.isArray(parsed)) {
-      return NextResponse.json({ clusters: parsed });
-    }
-
-    return NextResponse.json(parsed);
+    const text = result.response.text();
+    return NextResponse.json(JSON.parse(text));
 
   } catch (error: any) {
-    console.error("Cluster Route Crash:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("CRITICAL CLUSTER ERROR:", error);
+    return NextResponse.json({ 
+      error: error.message,
+      frank_hint: "Check if the version tag FRANK_V2 is visible on the frontend."
+    }, { status: 500 });
   }
 }
