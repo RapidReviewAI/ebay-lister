@@ -9,9 +9,8 @@ export async function handleImageUploadUtility(
       const compressedDataUrl = await new Promise<string>((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
-          const canvas = document.createElement("canvas");
-          let { width, height } = img;
           const maxDimension = 1200;
+          let { width, height } = img;
 
           if (width > maxDimension || height > maxDimension) {
             if (width > height) {
@@ -23,6 +22,7 @@ export async function handleImageUploadUtility(
             }
           }
 
+          const canvas = document.createElement("canvas");
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext("2d");
@@ -32,7 +32,31 @@ export async function handleImageUploadUtility(
             return;
           }
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL("image/jpeg", 0.8));
+          
+          let quality = 0.7;
+          let dataUrl = canvas.toDataURL("image/jpeg", quality);
+          
+          // Downscale quality/dimensions further if base64 size exceeds ~500 KB (approx 680,000 characters)
+          while (dataUrl.length > 680000 && quality > 0.15) {
+            quality -= 0.05;
+            dataUrl = canvas.toDataURL("image/jpeg", quality);
+          }
+
+          let scaleFactor = 0.9;
+          while (dataUrl.length > 680000 && scaleFactor > 0.3) {
+            const tempCanvas = document.createElement("canvas");
+            const tempCtx = tempCanvas.getContext("2d");
+            if (!tempCtx) break;
+            
+            tempCanvas.width = canvas.width * scaleFactor;
+            tempCanvas.height = canvas.height * scaleFactor;
+            tempCtx.drawImage(canvas, 0, 0, tempCanvas.width, tempCanvas.height);
+            
+            dataUrl = tempCanvas.toDataURL("image/jpeg", 0.7);
+            scaleFactor -= 0.1;
+          }
+
+          resolve(dataUrl);
           URL.revokeObjectURL(url);
         };
         img.onerror = () => {
