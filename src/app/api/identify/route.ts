@@ -1,58 +1,61 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenAI, Type, Schema } from "@google/genai";
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const genAI = new GoogleGenerativeAI(
+  process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ""
+);
 
 export const maxDuration = 60;
 
-const schema: Schema = {
-  type: Type.OBJECT,
+const schema = {
+  type: SchemaType.OBJECT,
   properties: {
-    identified: { type: Type.BOOLEAN },
-    confidence_score: { type: Type.NUMBER },
-    title: { type: Type.STRING },
-    brand: { type: Type.STRING },
-    model_or_sku: { type: Type.STRING },
-    department: { type: Type.STRING },
-    size: { type: Type.STRING },
-    color: { type: Type.STRING },
-    sizeType: { type: Type.STRING },
-    weightOz: { type: Type.STRING },
-    condition: { type: Type.STRING },
-    condition_confidence: { type: Type.STRING },
-    category: { type: Type.STRING },
-    categoryId: { type: Type.STRING },
-    description: { type: Type.STRING },
+    identified: { type: SchemaType.BOOLEAN },
+    confidence_score: { type: SchemaType.NUMBER },
+    title: { type: SchemaType.STRING },
+    brand: { type: SchemaType.STRING },
+    model_or_sku: { type: SchemaType.STRING },
+    department: { type: SchemaType.STRING },
+    size: { type: SchemaType.STRING },
+    color: { type: SchemaType.STRING },
+    sizeType: { type: SchemaType.STRING },
+    weightOz: { type: SchemaType.STRING },
+    condition: { type: SchemaType.STRING },
+    condition_confidence: { type: SchemaType.STRING },
+    category: { type: SchemaType.STRING },
+    categoryId: { type: SchemaType.STRING },
+    description: { type: SchemaType.STRING },
     key_search_keywords: { 
-      type: Type.ARRAY,
-      items: { type: Type.STRING }
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING }
     },
     item_specifics: {
-      type: Type.ARRAY,
+      type: SchemaType.ARRAY,
       items: {
-        type: Type.OBJECT,
+        type: SchemaType.OBJECT,
         properties: {
-          name: { type: Type.STRING },
-          value: { type: Type.STRING }
+          name: { type: SchemaType.STRING },
+          value: { type: SchemaType.STRING }
         }
       }
     },
     photo_roles: {
-      type: Type.ARRAY,
-      items: { type: Type.STRING }
+      type: SchemaType.ARRAY,
+      items: { type: SchemaType.STRING }
     },
-    suggested_shipping_type: { type: Type.STRING },
-    estimated_weight_lbs: { type: Type.NUMBER },
-    estimated_package_type: { type: Type.STRING },
-    suggested_paid_by: { type: Type.STRING },
-    unidentifiable_reason: { type: Type.STRING }
+    suggested_shipping_type: { type: SchemaType.STRING },
+    estimated_weight_lbs: { type: SchemaType.NUMBER },
+    estimated_package_type: { type: SchemaType.STRING },
+    suggested_paid_by: { type: SchemaType.STRING },
+    unidentifiable_reason: { type: SchemaType.STRING }
   },
   required: ["identified", "confidence_score", "title", "brand", "department", "size", "color", "sizeType", "weightOz", "model_or_sku", "condition", "condition_confidence", "categoryId", "description", "key_search_keywords", "item_specifics", "photo_roles", "suggested_shipping_type", "estimated_weight_lbs", "estimated_package_type", "suggested_paid_by", "unidentifiable_reason"]
 };
 
 export async function POST(req: NextRequest) {
   try {
-    if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY.trim() === "") {
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey.trim() === "") {
       return NextResponse.json({ error: "GEMINI_API_KEY is missing in .env.local" }, { status: 401 });
     }
 
@@ -102,62 +105,25 @@ CRITICAL SEO & OUTPUT GUIDELINES:
     }));
 
     parts.push({
-      text: "Please identify the item in the images."
+      text: systemInstruction + "\n\nPlease identify the item in the images."
     } as any);
 
-    let responseText = null;
-    const MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-3.1-pro"];
-    
-    for (const model of MODELS) {
-      let attempts = 0;
-      const maxAttempts = 3;
-      
-      while (attempts < maxAttempts) {
-        try {
-          const response = await ai.models.generateContent({
-            model: model,
-            contents: parts as any,
-            config: {
-              systemInstruction,
-              responseMimeType: "application/json",
-              responseSchema: schema,
-            }
-          });
-          
-          if (response.text) {
-            responseText = response.text;
-            break; // Break retry loop
-          }
-        } catch (err: any) {
-          attempts++;
-          console.error(`Error with ${model} on attempt ${attempts}:`, err.message);
-          if (attempts >= maxAttempts) break; // Break retry loop to try next model
-          
-          // Exponential backoff: 1000ms, 2000ms
-          const waitMs = Math.pow(2, attempts - 1) * 1000;
-          await new Promise(r => setTimeout(r, waitMs));
-        }
-      }
-      
-      if (responseText) break; // Break model loop if we got a response
-    }
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    if (!responseText) {
-      return NextResponse.json({ error: "The vision service is currently experiencing high demand. Please wait a few seconds and try again." }, { status: 503 });
-    }
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: schema as any,
+      },
+    });
 
-    try {
-      const data = JSON.parse(responseText);
-      return NextResponse.json(data);
-    } catch (parseError) {
-      console.error("JSON parse error:", parseError, responseText);
-      return NextResponse.json({ error: "Failed to parse response" }, { status: 500 });
-    }
+    const responseText = result.response.text();
+    const data = JSON.parse(responseText);
+    return NextResponse.json(data);
+
   } catch (error: any) {
-    console.error("Error in /api/identify:");
-    console.error("Message:", error.message);
-    console.error("Status:", error.status);
-    console.error("Stack:", error.stack);
-    return NextResponse.json({ error: "The vision service is currently experiencing high demand. Please wait a few seconds and try again." }, { status: 503 });
+    console.error("Error in /api/identify:", error.message);
+    return NextResponse.json({ error: error.message || "Failed to identify item" }, { status: 500 });
   }
 }

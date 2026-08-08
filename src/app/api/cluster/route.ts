@@ -1,25 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { fetch as undiciFetch } from 'undici'; // This is a "clean" fetch that hijackers usually miss.
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+
+const genAI = new GoogleGenerativeAI(
+  process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ""
+);
+
+const schema = {
+  type: SchemaType.ARRAY,
+  items: {
+    type: SchemaType.OBJECT,
+    properties: {
+      itemTitle: {
+        type: SchemaType.STRING,
+        description: "A descriptive 5-8 word title for the item cluster",
+      },
+      imageUrls: {
+        type: SchemaType.ARRAY,
+        items: { type: SchemaType.STRING },
+        description: "The URLs of the images that belong to this specific item",
+      },
+    },
+    required: ["itemTitle", "imageUrls"],
+  },
+};
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+      return NextResponse.json({ error: "API Key missing." }, { status: 500 });
+    }
 
     let { images } = body;
 
-    if (!images || !Array.isArray(images) || !API_KEY) {
-      return NextResponse.json({ error: "Configuration Error" }, { status: 400 });
+    if (!images || !Array.isArray(images) || images.length === 0) {
+      return NextResponse.json({ error: "No images provided." }, { status: 400 });
     }
 
-    const cleanUrls = images.map(img => {
+    const cleanUrls = images.map((img: any) => {
       if (typeof img === 'string') return img;
       if (typeof img === 'object' && img && img.url) return img.url;
       return null;
-    }).filter(u => u !== null) as string[];
+    }).filter((u: any) => u !== null) as string[];
 
-    // 1. Process images to Base64
-    const parts = await Promise.all(
+    const imageParts = await Promise.all(
       cleanUrls.map(async (url: string) => {
         try {
           let base64Data = url;
@@ -41,9 +67,9 @@ export async function POST(req: NextRequest) {
           }
 
           return {
-            inline_data: {
-              mime_type: mimeType,
-              data: base64Data
+            inlineData: {
+              data: base64Data,
+              mimeType: mimeType
             }
           };
         } catch (e) {
@@ -52,40 +78,29 @@ export async function POST(req: NextRequest) {
       })
     ).then(res => res.filter(p => p !== null));
 
-    // 2. Add the Text Part
-    parts.push({
-      text: "Group these images by product. Return a JSON array: [{itemTitle: string, imageUrls: string[]}]"
-    } as any);
-
-    // 3. Assemble the payload as a STIFF object
-    const payload = {
-      contents: [{ parts }],
-      generationConfig: { responseMimeType: "application/json" }
+    const promptPart = {
+      text: "Task: Group these images by unique product. Return a JSON array of objects with keys itemTitle and imageUrls."
     };
 
-    // 4. THE CLEAN FETCH (undici)
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
-    
-    // We use undiciFetch here because it doesn't use the global.fetch that might be hijacked
-    const geminiResponse = await undiciFetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+    const parts = [...imageParts, promptPart];
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const result = await model.generateContent({
+      contents: [{ role: "user", parts: parts as any }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: schema as any,
+      },
     });
 
-    const result: any = await geminiResponse.json();
+    const responseText = result.response.text();
+    const cleanJson = JSON.parse(responseText.replace(/```json|```/g, ""));
 
-    if (!geminiResponse.ok) {
-      // 🚨 CEO: IF THIS FAILS, THE SOURCE IS IN THE PAYLOAD. 🚨
-      console.error("🚨 V9 PAYLOAD SENT:", JSON.stringify(payload).substring(0, 500)); // Log the first 500 chars
-      console.error("🚨 GOOGLE REJECTION V9:", JSON.stringify(result));
-      return NextResponse.json(result, { status: 500 });
-    }
-
-    const textResponse = result.candidates[0].content.parts[0].text;
-    return NextResponse.json(JSON.parse(textResponse.replace(/```json|```/g, "")));
+    return NextResponse.json(cleanJson);
 
   } catch (error: any) {
+    console.error("🚨 CLUSTER ROUTE FAILURE:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
