@@ -108,9 +108,9 @@ export async function POST(req: NextRequest) {
       ...imageParts,
     ];
 
-    // Single model — strictly use gemini-1.5-flash with no retry/fallback chain
+    // Single model — strictly use gemini-2.5-flash with no retry/fallback chain
     const res = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
+      model: "gemini-2.5-flash",
       contents: parts,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
