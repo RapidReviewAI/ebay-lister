@@ -10,8 +10,35 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No images provided." }, { status: 400 });
     }
 
+    // 1. DIAGNOSTIC: Fetch what this specific key can actually see
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
+    const listRes = await fetch(listUrl);
+    const listData = await listRes.json();
+
+    if (listData.error) {
+      return NextResponse.json({ 
+        error: "API Key Validation Failed", 
+        details: listData.error.message,
+        hint: "Is 'Generative Language API' enabled in Google Cloud Console?"
+      }, { status: 401 });
+    }
+
+    const availableModels = listData.models?.map((m: any) => m.name.replace("models/", "")) || [];
+    
+    // 2. Determine the best available model from the list
+    const priority = ["gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-1.5-flash-latest", "gemini-1.0-pro-vision-latest"];
+    const selectedModel = priority.find(p => availableModels.includes(p)) || availableModels[0];
+
+    if (!selectedModel) {
+      return NextResponse.json({ 
+        error: "No suitable models found for this API Key.", 
+        available_models: availableModels 
+      }, { status: 404 });
+    }
+
+    // 3. Prepare the payload
     const parts: any[] = [
-      { text: "Cluster these images into distinct items for eBay. Group photos of the same item. Return JSON: [{'id': number, 'title': 'string', 'photo_indices': [numbers]}]" }
+      { text: "Cluster these images into distinct items for eBay. Return JSON: [{'id': number, 'title': 'string', 'photo_indices': [numbers]}]" }
     ];
 
     for (const img of images) {
@@ -38,64 +65,47 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Configuration for different attempts
-    const attempts = [
-      { model: "gemini-2.0-flash-exp", version: "v1beta" },
-      { model: "gemini-1.5-flash", version: "v1" },
-      { model: "gemini-1.5-flash-latest", version: "v1beta" }
-    ];
+    // 4. Execute with the discovered model
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${API_KEY}`;
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
+      })
+    });
 
-    let lastError = "";
+    const result = await response.json();
 
-    for (const attempt of attempts) {
-      try {
-        const endpoint = `https://generativelanguage.googleapis.com/${attempt.version}/models/${attempt.model}:generateContent?key=${API_KEY}`;
-        
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts }],
-            generationConfig: { 
-              responseMimeType: "application/json",
-              temperature: 0.1 
-            }
-          })
-        });
-
-        const result = await response.json();
-
-        if (result.error) {
-          lastError = `[${attempt.model}]: ${result.error.message}`;
-          continue;
-        }
-
-        if (result.candidates && result.candidates[0]?.content?.parts[0]?.text) {
-          const text = result.candidates[0].content.parts[0].text;
-          const cleanJson = text.replace(/```json|```/g, "").trim();
-          const parsed = JSON.parse(cleanJson);
-          const clusters = Array.isArray(parsed) ? parsed : (parsed.clusters || parsed);
-
-          return NextResponse.json({
-            data: clusters,
-            clusters: clusters,
-            model_used: attempt.model,
-            v: 10
-          });
-        }
-      } catch (err: any) {
-        lastError = err.message;
-        continue;
-      }
+    if (result.error) {
+      return NextResponse.json({ 
+        error: `Model ${selectedModel} failed`, 
+        details: result.error.message,
+        available_models: availableModels 
+      }, { status: 400 });
     }
 
-    return NextResponse.json({ 
-      error: "All models failed.", 
-      last_error_details: lastError,
-      suggestion: "Check if your API Key has 'Generative Language API' enabled in Google Cloud Console." 
-    }, { status: 500 });
+    if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return NextResponse.json({ 
+        error: `Model ${selectedModel} returned empty text`,
+        available_models: availableModels
+      }, { status: 500 });
+    }
+
+    const text = result.candidates[0].content.parts[0].text;
+    const cleanJson = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleanJson);
+    const clusters = Array.isArray(parsed) ? parsed : (parsed.clusters || parsed);
+    
+    return NextResponse.json({
+      data: clusters,
+      clusters: clusters,
+      model_used: selectedModel,
+      v: 11
+    });
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message, v: 10 }, { status: 500 });
+    return NextResponse.json({ error: error.message, v: 11 }, { status: 500 });
   }
 }
