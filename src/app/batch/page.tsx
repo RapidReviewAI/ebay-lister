@@ -34,6 +34,7 @@ type ProcessingStage =
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function BatchPage() {
+  const [selectedListing, setSelectedListing] = useState<any | null>(null);
   const [images, setImages] = useState<string[]>([]);
   const [listings, setListings] = useState<any[]>([]);
   const [stage, setStage] = useState<ProcessingStage>("idle");
@@ -439,7 +440,8 @@ export default function BatchPage() {
                   {listings.map((listing, idx) => (
                     <tr
                       key={listing.id || idx}
-                      className="hover:bg-slate-50/50 transition-colors"
+                      onClick={() => setSelectedListing(listing)}
+                      className="hover:bg-indigo-50/50 transition-colors cursor-pointer"
                     >
                       <td className="px-4 py-3">
                         <div className="w-12 h-12 rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
@@ -478,6 +480,112 @@ export default function BatchPage() {
               </table>
             </div>
           </section>
+        )}
+
+        {selectedListing && (
+          <div className="fixed inset-y-0 right-0 w-full max-w-xl bg-white shadow-2xl border-l border-slate-200 z-50 overflow-y-auto animate-in slide-in-from-right duration-300">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-xl font-bold text-slate-900">Listing Review</h3>
+                <button 
+                  onClick={() => setSelectedListing(null)}
+                  className="p-2 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <span className="text-2xl">×</span>
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Title Section (The Cassini Priority) */}
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">eBay Title (80 chars max)</label>
+                  <input 
+                    type="text"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg font-medium text-slate-800"
+                    value={selectedListing.title || ""}
+                    onChange={(e) => {
+                       const newTitle = e.target.value;
+                       setSelectedListing({...selectedListing, title: newTitle});
+                       setListings(prev => prev.map(l => l.id === selectedListing.id ? {...l, title: newTitle} : l));
+                    }}
+                  />
+                  <p className="text-[10px] mt-1 text-slate-400 text-right">{(selectedListing.title || "").length}/80</p>
+                </div>
+
+                {/* Financials & Logistics */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Price (USD)</label>
+                    <input 
+                      type="text"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg font-bold text-green-600"
+                      value={selectedListing.price || ""}
+                      onChange={(e) => {
+                        const newPrice = e.target.value;
+                        setSelectedListing({...selectedListing, price: newPrice});
+                        setListings(prev => prev.map(l => l.id === selectedListing.id ? {...l, price: newPrice} : l));
+                     }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Condition Code</label>
+                    <select 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-700"
+                      value={selectedListing.condition || "4000"}
+                      onChange={(e) => {
+                        const newCond = e.target.value;
+                        setSelectedListing({...selectedListing, condition: newCond});
+                        setListings(prev => prev.map(l => l.id === selectedListing.id ? {...l, condition: newCond} : l));
+                     }}
+                    >
+                      <option value="1000">New (1000)</option>
+                      <option value="3000">Very Good (3000)</option>
+                      <option value="4000">Good (4000)</option>
+                      <option value="5000">Acceptable (5000)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-1">Description</label>
+                  <textarea 
+                    rows={4}
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600"
+                    value={selectedListing.description || ""}
+                    onChange={(e) => {
+                      const newDesc = e.target.value;
+                      setSelectedListing({...selectedListing, description: newDesc});
+                      setListings(prev => prev.map(l => l.id === selectedListing.id ? {...l, description: newDesc} : l));
+                   }}
+                  />
+                </div>
+
+                {/* Item Specifics Grid */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100">
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-3">Item Specifics</label>
+                  <div className="grid grid-cols-2 gap-y-3 gap-x-4">
+                    {['Brand', 'Size', 'Color', 'Department'].map((key) => (
+                      <div key={key}>
+                        <span className="block text-[10px] text-slate-400 uppercase font-bold">{key}</span>
+                        <span className="text-sm font-medium text-slate-700">{selectedListing[key.toLowerCase()] || 'N/A'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Photo Gallery Review */}
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-400 mb-2">Listing Photos</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {selectedListing.photos?.map((url: string, i: number) => (
+                      <img key={i} src={url} className="w-full aspect-square object-cover rounded-lg border border-slate-200" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
       </main>
 
