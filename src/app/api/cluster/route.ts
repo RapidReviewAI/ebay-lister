@@ -9,15 +9,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
-    // 1. Prepare the parts array for the REST API
-    const parts: any[] = [];
+    if (!API_KEY) {
+      return NextResponse.json({ error: "API key missing" }, { status: 500 });
+    }
 
-    // Add the text prompt first
-    parts.push({
-      text: "Cluster these images into distinct items. Return a JSON object with a key 'clusters' containing an array of objects, each with 'id', 'title', and 'photo_indices' (the 0-based indexes of the images belonging to that item)."
-    });
+    // 1. Build the PARTS array (Text + all Images)
+    const parts: any[] = [
+      { text: "Cluster these images into distinct items. Return a JSON object with key 'clusters' containing an array of objects: { \"clusters\": [{ \"id\": \"1\", \"title\": \"Item Name\", \"photo_indices\": [0, 1] }] }" }
+    ];
 
-    // Add the images
     for (const imgStr of images) {
       let b64Data = "";
       let mimeType = "image/jpeg";
@@ -29,12 +29,7 @@ export async function POST(req: NextRequest) {
         mimeType = res.headers.get("content-type") || "image/jpeg";
       } else {
         b64Data = imgStr.split(",")[1] || imgStr;
-        if (imgStr.includes(";base64,")) {
-          const header = imgStr.split(";base64,")[0];
-          if (header.includes(":")) {
-            mimeType = header.split(":")[1] || "image/jpeg";
-          }
-        }
+        mimeType = imgStr.includes("image/png") ? "image/png" : "image/jpeg";
       }
 
       parts.push({
@@ -45,24 +40,48 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 2. Call the Gemini REST API directly (Bypassing SDK weirdness)
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    // 2. The Payload: ONE content object, ONE role, MANY parts.
+    const payload = {
+      contents: [
+        {
+          role: "user",
+          parts: parts
+        }
+      ],
+      generationConfig: {
+        responseMimeType: "application/json"
+      }
+    };
+
+    // 3. Use Gemini 2.0 Flash (with fallback to 1.5-flash)
+    let endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key=${API_KEY}`;
     
-    const response = await fetch(endpoint, {
+    let response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: {
-          responseMimeType: "application/json"
-        }
-      })
+      body: JSON.stringify(payload)
     });
 
-    const result = await response.json();
+    let result = await response.json();
+
+    if (result.error && (result.error.code === 404 || result.error.status === "NOT_FOUND")) {
+      console.warn("gemini-2.0-flash-exp endpoint not found, falling back to gemini-1.5-flash");
+      endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      result = await response.json();
+    }
 
     if (result.error) {
-      throw new Error(result.error.message);
+      console.error("Gemini API Error:", result.error);
+      return NextResponse.json({ error: result.error.message }, { status: 500 });
+    }
+
+    if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+      return NextResponse.json({ error: "Empty response from AI" }, { status: 500 });
     }
 
     const textResponse = result.candidates[0].content.parts[0].text;
@@ -75,7 +94,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(parsed);
 
   } catch (error: any) {
-    console.error("Cluster Error:", error.message);
+    console.error("Cluster Route Crash:", error.message);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
