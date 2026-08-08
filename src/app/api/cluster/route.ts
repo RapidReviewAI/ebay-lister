@@ -1,37 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { fetch as undiciFetch } from 'undici'; // This is a "clean" fetch that hijackers usually miss.
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
-    // CEO DEBUG LOG: This will show up in your terminal/Vercel logs.
-    console.log("🚨 RAW INPUT KEYS:", Object.keys(body));
-
     let { images } = body;
 
-    if (!images || !Array.isArray(images)) {
-      return NextResponse.json({ error: "No images provided." }, { status: 400 });
+    if (!images || !Array.isArray(images) || !API_KEY) {
+      return NextResponse.json({ error: "Configuration Error" }, { status: 400 });
     }
 
-    if (!API_KEY) {
-      return NextResponse.json({ error: "API Key missing." }, { status: 500 });
-    }
-
-    // SANITIZATION STEP: 
-    // We ensure 'urls' is ONLY an array of strings. 
-    // If the frontend sent [{url: '...', source: '...'}], this extracts just the string.
     const cleanUrls = images.map(img => {
       if (typeof img === 'string') return img;
       if (typeof img === 'object' && img && img.url) return img.url;
       return null;
     }).filter(u => u !== null) as string[];
 
-    console.log(`🚨 PROCESSING ${cleanUrls.length} CLEANED URLS`);
-
-    // 1. Fetch images and convert to Base64
-    const base64Images = await Promise.all(
-      cleanUrls.map(async (url) => {
+    // 1. Process images to Base64
+    const parts = await Promise.all(
+      cleanUrls.map(async (url: string) => {
         try {
           let base64Data = url;
           let mimeType = "image/jpeg";
@@ -51,50 +40,52 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          return { data: base64Data, mimeType };
+          return {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64Data
+            }
+          };
         } catch (e) {
           return null;
         }
       })
-    ).then(res => res.filter(b => b !== null));
+    ).then(res => res.filter(p => p !== null));
 
-    // 2. Build the payload manually (Sterile Template)
+    // 2. Add the Text Part
+    parts.push({
+      text: "Group these images by product. Return a JSON array: [{itemTitle: string, imageUrls: string[]}]"
+    } as any);
+
+    // 3. Assemble the payload as a STIFF object
     const payload = {
-      contents: [{
-        parts: [
-          ...base64Images.map(img => ({
-            inline_data: { mime_type: img!.mimeType, data: img!.data }
-          })),
-          { text: "Group these eBay images by unique product. Return a JSON array of objects: {itemTitle: string, imageUrls: string[]}" }
-        ]
-      }],
-      generationConfig: {
-        responseMimeType: "application/json"
-      }
+      contents: [{ parts }],
+      generationConfig: { responseMimeType: "application/json" }
     };
 
-    // 3. The REST Call
+    // 4. THE CLEAN FETCH (undici)
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
     
-    const geminiResponse = await fetch(endpoint, {
+    // We use undiciFetch here because it doesn't use the global.fetch that might be hijacked
+    const geminiResponse = await undiciFetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
 
-    const result = await geminiResponse.json();
+    const result: any = await geminiResponse.json();
 
     if (!geminiResponse.ok) {
-      // BOSS: If it fails, this is the error you need to copy/paste for me.
-      console.error("🚨 GOOGLE REJECTION:", JSON.stringify(result));
-      return NextResponse.json({ error: "Google API Refusal", details: result }, { status: 500 });
+      // 🚨 CEO: IF THIS FAILS, THE SOURCE IS IN THE PAYLOAD. 🚨
+      console.error("🚨 V9 PAYLOAD SENT:", JSON.stringify(payload).substring(0, 500)); // Log the first 500 chars
+      console.error("🚨 GOOGLE REJECTION V9:", JSON.stringify(result));
+      return NextResponse.json(result, { status: 500 });
     }
 
     const textResponse = result.candidates[0].content.parts[0].text;
     return NextResponse.json(JSON.parse(textResponse.replace(/```json|```/g, "")));
 
   } catch (error: any) {
-    console.error("🚨 CRITICAL ROUTE FAILURE:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
