@@ -9,6 +9,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
+    // Direct REST API Call using active gemini-1.5-flash
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
 
     const formattedImages = images.map((base64Str: string) => ({
@@ -40,7 +41,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: data.error?.message || "Gemini REST API Error" }, { status: response.status });
     }
 
-    const responseText = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const responseText = data.candidates?.[0]?.content?.[0]?.text || data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     return NextResponse.json({ success: true, data: responseText });
 
   } catch (error: any) {
