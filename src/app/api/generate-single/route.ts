@@ -10,23 +10,25 @@ export const maxDuration = 300;
 
 const SYSTEM_INSTRUCTION = `You are a master eBay listing architect. 
 Analyze the images and generate a high-converting listing JSON.
-STRICT RULES:
-1. TITLE: Max 80 characters. Put the most important keywords first (Brand, Model, Size, Material). No fluff like "L@@K" or "RARE".
-2. CATEGORY: Provide a specific numeric eBay Leaf Category ID.
-3. ITEM SPECIFICS: Provide at least 8-10 specific 'aspects' relevant to the item.
-4. CONDITION: Use eBay standard IDs (1000: New, 3000: Used, 4000: Very Good, 5000: Good).
 
-JSON Format:
+REQUIRED TAXONOMY:
+- For 'category', use a human-readable breadcrumb (e.g., "Collectibles > Comic Books > Modern Age").
+- For 'categoryId', use the most accurate eBay numeric Leaf Category ID.
+- For 'item_specifics', you MUST extract: Brand, Color, Size, Material, Style, and Department.
+
+STRICT JSON SCHEMA:
 {
-  "title": "string",
-  "description": "string (HTML formatted for eBay)",
+  "title": "string (80 chars max)",
+  "description": "string (HTML)",
   "price": "string",
+  "category": "string",
   "categoryId": "string",
-  "condition": "string",
-  "item_specifics": [{"name": "string", "value": "string"}],
+  "condition": "1000|3000|4000|5000",
   "brand": "string",
   "size": "string",
-  "color": "string"
+  "color": "string",
+  "department": "string",
+  "item_specifics": [{"name": "string", "value": "string"}]
 }`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
@@ -109,7 +111,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 16
+      v: 17
     });
 
   } catch (error: any) {
