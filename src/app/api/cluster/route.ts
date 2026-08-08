@@ -5,26 +5,19 @@ export async function POST(req: NextRequest) {
     const { images } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
 
-    if (!API_KEY) return NextResponse.json({ error: "API Key missing." }, { status: 500 });
+    if (!API_KEY) {
+      return NextResponse.json({ error: "API Key missing from environment variables." }, { status: 500 });
+    }
+
     if (!images || !Array.isArray(images) || images.length === 0) {
-      return NextResponse.json({ error: "No images provided" }, { status: 400 });
+      return NextResponse.json({ error: "No images provided for clustering." }, { status: 400 });
     }
 
-    // DIAGNOSTIC: Let's see what models this key can actually see
-    // This will show up in your Vercel Logs
-    try {
-      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
-      const listRes = await fetch(listUrl);
-      const listData = await listRes.json();
-      console.log("AVAILABLE MODELS:", JSON.stringify(listData));
-    } catch (e) {
-      console.error("Failed to list models:", e);
-    }
+    const parts: any[] = [
+      { text: "System: You are an eBay listing expert. Cluster these images into distinct items. If multiple photos belong to the same item, group them. Return a valid JSON array of objects: [{'id': number, 'title': 'string', 'photo_indices': [numbers]}]. Use only the provided indices." }
+    ];
 
-    const parts: any[] = [];
-    parts.push({ text: "Cluster these images into items. Return JSON: [{id, title, photo_indices}]" });
-
-    for (const img of images) {
+    for (const [index, img] of images.entries()) {
       let b64 = img;
       let mime = "image/jpeg";
 
@@ -48,38 +41,61 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // TRYING GEMINI 2.0 FLASH EXPERIMENTAL ON V1BETA
-    const modelName = "gemini-2.0-flash-exp";
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
-    
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts }],
-        generationConfig: { responseMimeType: "application/json" }
-      })
-    });
+    // Attempting Gemini 2.0 Flash Experimental, fallback to 1.5 Flash
+    const modelsToTry = ["gemini-2.0-flash-exp", "gemini-1.5-flash"];
+    let lastError = "";
 
-    const result = await response.json();
+    for (const model of modelsToTry) {
+      try {
+        const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${API_KEY}`;
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts }],
+            generationConfig: { 
+              responseMimeType: "application/json",
+              temperature: 0.1 
+            }
+          })
+        });
 
-    if (result.error) {
-      return NextResponse.json({ 
-        error: result.error.message, 
-        suggestion: "Check Vercel logs for 'AVAILABLE MODELS' list.",
-        v: 8 
-      }, { status: 400 });
+        const result = await response.json();
+
+        if (result.error) {
+          console.error(`Model ${model} failed:`, result.error.message);
+          lastError = result.error.message;
+          continue; 
+        }
+
+        if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
+          lastError = `Model ${model} returned empty response`;
+          continue;
+        }
+
+        const text = result.candidates[0].content.parts[0].text;
+        // Clean potential markdown if the model ignored responseMimeType
+        const cleanJson = text.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(cleanJson);
+        const clusters = Array.isArray(parsed) ? parsed : (parsed.clusters || parsed);
+
+        return NextResponse.json({ 
+          clusters: clusters,
+          data: clusters,
+          model_used: model,
+          v: 9 
+        });
+
+      } catch (err: any) {
+        lastError = err.message;
+        continue;
+      }
     }
 
-    if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-      return NextResponse.json({ error: "Empty AI response", v: 8 }, { status: 500 });
-    }
-
-    const text = result.candidates[0].content.parts[0].text;
-    const parsed = JSON.parse(text);
-    return NextResponse.json(parsed);
+    return NextResponse.json({ error: "All models failed.", details: lastError }, { status: 500 });
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message, v: 8 }, { status: 500 });
+    console.error("CRITICAL ROUTE ERROR:", error.message);
+    return NextResponse.json({ error: error.message, v: 9 }, { status: 500 });
   }
 }
