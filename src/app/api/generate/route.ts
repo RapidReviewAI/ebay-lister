@@ -8,29 +8,26 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `
-You are a master eBay listing architect.
-TASK: Generate a high-converting listing for the item in the photos.
+const SYSTEM_INSTRUCTION = `You are a master eBay listing architect. 
+Analyze the images and generate a high-converting listing JSON.
+STRICT RULES:
+1. TITLE: Max 80 characters. Put the most important keywords first (Brand, Model, Size, Material). No fluff like "L@@K" or "RARE".
+2. CATEGORY: Provide a specific numeric eBay Leaf Category ID.
+3. ITEM SPECIFICS: Provide at least 8-10 specific 'aspects' relevant to the item.
+4. CONDITION: Use eBay standard IDs (1000: New, 3000: Used, 4000: Very Good, 5000: Good).
 
-TITLING RULES:
-- Max 80 characters. Keywords first.
-
-JSON SCHEMA:
-Return ONLY:
+JSON Format:
 {
   "title": "string",
-  "description": "string",
+  "description": "string (HTML formatted for eBay)",
   "price": "string",
-  "category": "string",
   "categoryId": "string",
   "condition": "string",
+  "item_specifics": [{"name": "string", "value": "string"}],
   "brand": "string",
   "size": "string",
-  "color": "string",
-  "item_specifics": [{"name": "string", "value": "string"}],
-  "cover_photo_index": number
-}
-`.trim();
+  "color": "string"
+}`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let b64Data = imgStr;
@@ -66,21 +63,39 @@ export async function POST(req: NextRequest) {
     }
 
     const imageParts = await Promise.all(photos.map(imageUrlToInlineData));
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-flash-latest",
-      generationConfig: { responseMimeType: "application/json" }
-    });
+    const MODELS_TO_TRY = ["gemini-flash-latest", "gemini-1.5-flash"];
+    let responseText = "";
+    let modelUsed = "";
 
-    const result = await model.generateContent([
-      SYSTEM_INSTRUCTION,
-      ...imageParts,
-      "Generate the eBay listing JSON now."
-    ]);
+    for (const modelName of MODELS_TO_TRY) {
+      try {
+        const model = genAI.getGenerativeModel({ 
+          model: modelName,
+          generationConfig: { responseMimeType: "application/json" }
+        });
 
-    const responseText = result.response.text();
+        const result = await model.generateContent([
+          SYSTEM_INSTRUCTION,
+          ...imageParts,
+          "Generate the eBay listing JSON now."
+        ]);
+
+        responseText = result.response.text();
+        if (responseText) {
+          modelUsed = modelName;
+          break;
+        }
+      } catch (err: any) {
+        console.error(`Attempt with ${modelName} failed:`, err.message);
+        continue;
+      }
+    }
+
+    if (!responseText) throw new Error("All models failed to generate content.");
+
     const listing = JSON.parse(responseText.replace(/```json|```/g, "").trim());
 
-    // FIX: Generate a valid UUID so PostgreSQL (22P02) doesn't crash
+    // Generate a valid UUID so PostgreSQL (22P02) doesn't crash
     const validId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4();
 
     const coverIdx = listing.cover_photo_index ?? 0;
@@ -91,9 +106,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ...listing,
-      id: validId, // Override AI's garbage ID with a real UUID
+      id: validId,
       photos: orderedPhotos,
-      v: 15
+      model_debug: modelUsed,
+      v: 16
     });
 
   } catch (error: any) {
