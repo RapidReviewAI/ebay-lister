@@ -67,72 +67,10 @@ export default function BatchPage() {
       if (data) {
         if (data.default_shipping_profile) setShippingProfileId(data.default_shipping_profile);
         if (data.default_return_policy) setReturnProfileId(data.default_return_policy);
-        if (data.default_payment_policy) setPaymentProfileId(data.default_payment_policy);
       }
     }
     loadProfile();
   }, []);
-
-  useEffect(() => {
-    if (listings.length === 0) return;
-
-    const timer = setTimeout(async () => {
-      try {
-        const supabase = createClient();
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const listingsToSave = listings.map((l) => ({
-          id: l.id || undefined,
-          user_id: user.id,
-          title: l.title || "Untitled Bulk Listing",
-          description: l.description || "",
-          price: l.price
-            ? parseFloat(String(l.price).replace(/[^0-9.]/g, "")) || 0
-            : 0,
-          condition: l.condition || "4000",
-          category: l.category || "Unknown",
-          specifics: {
-            brand: l.brand || "",
-            department: l.department || "",
-            size: l.size || "",
-            color: l.color || "",
-            sizeType: l.sizeType || "",
-            weightOz: l.weightOz || "",
-            item_specifics: l.item_specifics || [],
-          },
-          photos: l.photos || [],
-        }));
-
-        const { data, error } = await supabase
-          .from("listings")
-          .upsert(listingsToSave, { onConflict: "id" })
-          .select("id, title, photos");
-
-        if (error) {
-          console.error("Error saving batch listings:", error);
-        } else if (data && data.length > 0) {
-          setListings((prev) =>
-            prev.map((l) => {
-              if (l.id) return l;
-              const saved = data.find(
-                (d: any) =>
-                  d.title === l.title &&
-                  d.photos.join(",") === (l.photos || []).join(",")
-              );
-              return saved ? { ...l, id: saved.id } : l;
-            })
-          );
-        }
-      } catch (err) {
-        console.error("Failed to auto-save batch listings:", err);
-      }
-    }, 1000);
-
-    return () => clearTimeout(timer);
-  }, [listings]);
 
   // ── Image upload ─────────────────────────────────────────────────────────
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,7 +89,7 @@ export default function BatchPage() {
    *          Completed drafts are appended to state immediately.
    */
   const handleProcess = async () => {
-    if (images.length === 0 || isRunning) return; // GATE 1: Prevents double-clicks & re-entry
+    if (images.length === 0 || isRunning) return;
 
     setStage("clustering");
     setErrorMsg(null);
@@ -159,75 +97,78 @@ export default function BatchPage() {
     setProgress({ current: 0, total: 0 });
 
     try {
-      // ── Stage 1: Cluster ──────────────────────────────────────────────────
-      const { data } = await axios.post<any>(
-        "/api/cluster",
-        { images }
-      );
+      // STAGE 1: Cluster
+      const { data } = await axios.post("/api/cluster", { images });
+      const clusters = Array.isArray(data) ? data : (data.clusters || data.data || []);
+      
+      if (!clusters?.length) throw new Error("No clusters returned.");
 
-      const clusters: Cluster[] = Array.isArray(data)
-        ? data
-        : (data.clusters || data.data || []);
-
-      if (!clusters || clusters.length === 0) {
-        throw new Error(data.error || "No clusters returned from AI.");
-      }
-
-      // ── Stage 2: Generate listings one-by-one ────────────────────────────
+      // STAGE 2: Generate
       setStage("generating");
       setProgress({ current: 0, total: clusters.length });
 
-      const newListings: any[] = [];
+      const finalResults: any[] = [];
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
 
       for (let i = 0; i < clusters.length; i++) {
         const cluster = clusters[i];
-        const clusterPhotos = (cluster.photo_indices || [])
-          .map((idx) => images[idx])
-          .filter(Boolean);
+        const clusterPhotos = (cluster.photo_indices || []).map((idx: number) => images[idx]).filter(Boolean);
 
         if (clusterPhotos.length === 0) continue;
 
         try {
-          const { data: listing } = await axios.post(
-            "/api/generate-single",
-            { photos: clusterPhotos }
-          );
-
-          if (listing && Array.isArray(listing.photos) && clusterPhotos[0]) {
-            const firstPhoto = clusterPhotos[0];
-            listing.photos = [
-              firstPhoto,
-              ...listing.photos.filter((p: string) => p !== firstPhoto),
-            ];
+          // CALLING THE UPDATED ROUTE (/api/generate with /api/generate-single fallback)
+          let listing: any = null;
+          try {
+            const res = await axios.post("/api/generate", { photos: clusterPhotos });
+            listing = res.data;
+          } catch {
+            const res = await axios.post("/api/generate-single", { photos: clusterPhotos });
+            listing = res.data;
+          }
+          
+          if (user && listing?.id) {
+            // Save to Supabase immediately for each item to avoid one big failure at the end
+            const { data: savedData, error: saveError } = await supabase
+              .from("listings")
+              .upsert({
+                id: listing.id,
+                user_id: user.id,
+                title: listing.title || "Untitled Bulk Listing",
+                description: listing.description || "",
+                price: parseFloat(String(listing.price).replace(/[^0-9.]/g, "")) || 0,
+                condition: listing.condition || "4000",
+                category: listing.category || "Unknown",
+                specifics: { ...listing },
+                photos: listing.photos || []
+              })
+              .select()
+              .single();
+            
+            if (!saveError && savedData) finalResults.push(savedData);
+            else finalResults.push(listing);
+          } else {
+            finalResults.push(listing);
           }
 
-          newListings.push(listing);
-          setListings([...newListings]);
-        } catch (err: any) {
-          console.error(`generate-single failed for cluster ${i}:`, err);
-          newListings.push({
+        } catch (err) {
+          console.error(`Generation failed for cluster ${i}`, err);
+          finalResults.push({
             id: `error-${i}`,
             title: `⚠ Item ${i + 1} — generation failed`,
-            photos: clusterPhotos,
-            price: "",
-            category: "",
-            categoryId: "",
-            condition: "4000",
+            photos: clusterPhotos
           });
-          setListings([...newListings]);
         }
-
+        
+        // Update state to show items appearing in the UI one-by-one
+        setListings([...finalResults]);
         setProgress({ current: i + 1, total: clusters.length });
       }
 
       setStage("done");
     } catch (err: any) {
-      console.error("Batch processing failed:", err);
-      setErrorMsg(
-        err?.response?.data?.error ??
-        err?.message ??
-        "Failed to process batch photos. Please try again."
-      );
+      setErrorMsg(err.message || "Batch process failed.");
       setStage("error");
     }
   };
