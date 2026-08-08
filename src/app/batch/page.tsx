@@ -316,7 +316,9 @@ export default function BatchPage() {
   // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans pb-20 selection:bg-indigo-100">
-      <div className="w-full bg-red-600 text-white text-xs py-1 text-center font-bold">DEPLOYED: FRANK_V2_NESTED_STRICT</div>
+      <div className="w-full bg-yellow-400 text-black py-4 text-center font-black text-2xl border-b-4 border-black">
+        VERIFICATION: FRANK_V3_ULTRA_STRICT
+      </div>
       <Navbar mode="batch" onSettingsClick={() => setIsSettingsOpen(true)} />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
