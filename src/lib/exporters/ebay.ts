@@ -16,9 +16,9 @@ export function generateEbayCSV(items: MasterItem[], userProfile: Profile): stri
     "Duration",
     "Location",
     "PostalCode",
-    "ShippingProfileName",
-    "ReturnProfileName",
-    "PaymentProfileName",
+    "ShippingProfileID",
+    "ReturnProfileID",
+    "PaymentProfileID",
     "WeightMajor",
     "WeightMinor",
     "WeightUnit",
@@ -33,6 +33,15 @@ export function generateEbayCSV(items: MasterItem[], userProfile: Profile): stri
     const cleaned = String(val ?? '').replace(/[^0-9.]/g, '');
     const num = parseFloat(cleaned);
     return isNaN(num) || num <= 0 ? "19.99" : num.toFixed(2);
+  };
+
+  const getNumericProfileID = (val: string | undefined | null, fallback: string): string => {
+    if (!val) return fallback;
+    const clean = val.trim();
+    if (/^\d+$/.test(clean)) return clean;
+    const digits = clean.replace(/\D/g, '');
+    if (digits.length > 0) return digits;
+    return fallback;
   };
 
   const cleanCell = (val: any) => `"${String(val ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""')}"`;
@@ -59,9 +68,9 @@ export function generateEbayCSV(items: MasterItem[], userProfile: Profile): stri
       "GTC", // Duration
       "United States", // Location
       userProfile.default_postal_code || "49286", // PostalCode
-      userProfile.default_shipping_profile || "Standard Shipping", // ShippingProfileName
-      userProfile.default_return_policy || "No Returns", // ReturnProfileName
-      userProfile.default_payment_policy || "eBay Payments", // PaymentProfileName
+      getNumericProfileID(userProfile.default_shipping_profile, "158932641011"), // ShippingProfileID
+      getNumericProfileID(userProfile.default_return_policy, "158932641012"), // ReturnProfileID
+      getNumericProfileID(userProfile.default_payment_policy, "158932641013"), // PaymentProfileID
       "0", // WeightMajor
       String(item.weightOz || "8"), // WeightMinor
       "oz", // WeightUnit

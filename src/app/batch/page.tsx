@@ -142,10 +142,10 @@ export default function BatchPage() {
         ai_credits_used: 0,
         updated_at: "",
         default_postal_code: process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286",
-        default_shipping_profile: "Standard Shipping",
-        default_return_policy: "No Returns",
+        default_shipping_profile: "158932641011",
+        default_return_policy: "158932641012",
         default_handling_time: "1",
-        default_payment_policy: "eBay Payments",
+        default_payment_policy: "158932641013",
       };
 
       if (user) {
