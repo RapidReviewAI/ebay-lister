@@ -102,26 +102,27 @@ export function PhotoGallery({
                 )}
 
                 {removingBgIndex === idx && (
-                  <div className="absolute inset-0 flex items-center justify-center bg-slate-900/20 backdrop-blur-sm">
-                    <RefreshCw className="w-6 h-6 text-white animate-spin" />
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/40 backdrop-blur-sm z-10">
+                    <RefreshCw className="w-8 h-8 text-white animate-spin mb-2" />
+                    <span className="text-white text-xs font-semibold drop-shadow-md">Cleaning...</span>
                   </div>
                 )}
 
                 {!removingBgIndex && !isAnalyzing && (
-                  <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col gap-1">
+                  <div className="absolute top-0 right-0 p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200 flex flex-col gap-2 z-10">
                     <button
                       onClick={() => removeImage(idx)}
-                      className="bg-slate-900/70 text-white rounded-full p-1.5 backdrop-blur-md hover:bg-red-500 transition-colors"
+                      className="bg-slate-900/70 text-white rounded-full p-2 backdrop-blur-md hover:bg-red-500 active:bg-red-600 transition-colors shadow-sm"
                       title="Remove image"
                     >
-                      <X className="w-3 h-3" />
+                      <X className="w-4 h-4" />
                     </button>
                     <button
                       onClick={() => handleRemoveBg(idx)}
-                      className="bg-slate-900/70 text-white rounded-full p-1.5 backdrop-blur-md hover:bg-indigo-500 transition-colors"
+                      className="bg-slate-900/70 text-white rounded-full p-2 backdrop-blur-md hover:bg-indigo-500 active:bg-indigo-600 transition-colors shadow-sm"
                       title="Clean background"
                     >
-                      <Wand2 className="w-3 h-3" />
+                      <Wand2 className="w-4 h-4" />
                     </button>
                   </div>
                 )}
