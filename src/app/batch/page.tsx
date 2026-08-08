@@ -166,6 +166,11 @@ export default function BatchPage() {
         // Update state to show items appearing in the UI one-by-one
         setListings([...finalResults]);
         setProgress({ current: i + 1, total: clusters.length });
+
+        // FRANK'S RATE LIMIT PROTECTOR: Wait 2s between items to stay under Gemini free tier limits
+        if (i < clusters.length - 1) {
+          await new Promise((r) => setTimeout(r, 2000));
+        }
       }
 
       setStage("done");
