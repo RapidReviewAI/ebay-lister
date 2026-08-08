@@ -9,10 +9,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
-    // Direct REST API call strictly targeting active gemini-2.0-flash
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
-
-    // Convert Cloudinary image URLs to raw Base64 buffers on the server
+    // Convert Cloudinary image URLs or raw base64 to base64 image input payloads
     const formattedImages = await Promise.all(
       images.map(async (img: string) => {
         let base64Data = img;
@@ -26,25 +23,27 @@ export async function POST(req: Request) {
         }
 
         return {
-          inline_data: {
-            mime_type: "image/jpeg",
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/jpeg",
             data: base64Data,
           },
         };
       })
     );
 
+    // Call the Google GenAI Interactions API endpoint
+    const url = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`;
+
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              { text: "Cluster these photos into distinct individual items for eBay listings. Return JSON." },
-              ...formattedImages,
-            ],
-          },
+        model: "gemini-2.5-flash",
+        input: [
+          { type: "text", text: "Cluster these photos into distinct individual items for eBay listings. Return JSON." },
+          ...formattedImages,
         ],
       }),
     });
@@ -56,7 +55,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: data.error?.message || "Gemini REST API Error" }, { status: response.status });
     }
 
-    const responseText = data.candidates?.[0]?.content?.[0]?.text || data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    const responseText = data.output?.[0]?.text || data.candidates?.[0]?.content?.parts?.[0]?.text || "";
     return NextResponse.json({ success: true, data: responseText });
 
   } catch (error: any) {
