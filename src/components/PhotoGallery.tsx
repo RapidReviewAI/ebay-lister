@@ -52,7 +52,6 @@ export function PhotoGallery({
         <input
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           ref={fileInputRef}
           className="hidden"
