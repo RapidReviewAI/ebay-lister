@@ -8,26 +8,24 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are a master eBay listing architect. 
-Analyze the images and generate a high-converting listing JSON.
+const SYSTEM_INSTRUCTION = `You are a master eBay listing architect.
+Generate a high-converting listing JSON.
 
-REQUIRED TAXONOMY:
-- For 'category', use a human-readable breadcrumb (e.g., "Collectibles > Comic Books > Modern Age").
-- For 'categoryId', use the most accurate eBay numeric Leaf Category ID.
-- For 'item_specifics', you MUST extract: Brand, Color, Size, Material, Style, and Department.
+DESCRIPTION RULE:
+- Use PLAIN TEXT with simple formatting.
+- Use double line breaks for paragraphs.
+- Use dashes (-) for bullet points.
+- NO HTML TAGS.
 
-STRICT JSON SCHEMA:
+JSON Format:
 {
-  "title": "string (80 chars max)",
-  "description": "string (HTML)",
+  "title": "string",
+  "description": "string",
   "price": "string",
-  "category": "string",
   "categoryId": "string",
-  "condition": "1000|3000|4000|5000",
   "brand": "string",
   "size": "string",
   "color": "string",
-  "department": "string",
   "item_specifics": [{"name": "string", "value": "string"}]
 }`.trim();
 
@@ -108,7 +106,7 @@ export async function POST(req: NextRequest) {
       size: listing.size || findSpec("Size") || "N/A",
       color: listing.color || findSpec("Color") || "Multi-Color",
       category: listing.category || "Collectibles > Non-Sport Trading Cards",
-      categoryId: listing.categoryId || "183050", // Default to Trading Cards if it fails
+      categoryId: listing.categoryId || "183050",
     };
 
     // Generate a valid UUID so PostgreSQL (22P02) doesn't crash
@@ -125,7 +123,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 18
+      v: 19
     });
 
   } catch (error: any) {
