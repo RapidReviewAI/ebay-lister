@@ -9,34 +9,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Missing GEMINI_API_KEY" }, { status: 500 });
     }
 
-    // Direct REST API Call using active gemini-1.5-flash
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+    // Direct REST API call strictly targeting active gemini-2.0-flash
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
 
+    // Convert Cloudinary image URLs to raw Base64 buffers on the server
     const formattedImages = await Promise.all(
-      images.map(async (imgStr: string) => {
-        let data = imgStr;
-        let mimeType = "image/jpeg";
+      images.map(async (img: string) => {
+        let base64Data = img;
 
-        if (imgStr.startsWith("http://") || imgStr.startsWith("https://")) {
-          const res = await fetch(imgStr);
-          const buf = await res.arrayBuffer();
-          data = Buffer.from(buf).toString("base64");
-          mimeType = res.headers.get("content-type") || "image/jpeg";
+        if (img.startsWith("http://") || img.startsWith("https://")) {
+          const res = await fetch(img);
+          const arrayBuffer = await res.arrayBuffer();
+          base64Data = Buffer.from(arrayBuffer).toString("base64");
         } else {
-          data = imgStr.replace(/^data:image\/\w+;base64,/, "");
-          if (imgStr.startsWith("data:")) {
-            const commaIdx = imgStr.indexOf(",");
-            if (commaIdx !== -1) {
-              const header = imgStr.slice(0, commaIdx);
-              mimeType = header.split(":")[1]?.split(";")[0] ?? "image/jpeg";
-            }
-          }
+          base64Data = base64Data.replace(/^data:image\/\w+;base64,/, "");
         }
 
         return {
           inline_data: {
-            mime_type: mimeType,
-            data,
+            mime_type: "image/jpeg",
+            data: base64Data,
           },
         };
       })
