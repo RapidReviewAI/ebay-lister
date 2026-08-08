@@ -48,6 +48,7 @@ export default function Home() {
   const [itemSpecifics, setItemSpecifics] = useState<ItemSpecific[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -562,6 +563,7 @@ export default function Home() {
               isAnalyzing={isAnalyzing}
               removingBgIndex={removingBgIndex}
               fileInputRef={fileInputRef}
+              cameraInputRef={cameraInputRef}
               handleImageUpload={handleImageUpload}
               removeImage={removeImage}
               handleRemoveBg={handleRemoveBg}

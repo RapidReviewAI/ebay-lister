@@ -7,6 +7,7 @@ interface PhotoGalleryProps {
   isAnalyzing: boolean;
   removingBgIndex: number | null;
   fileInputRef: RefObject<HTMLInputElement | null>;
+  cameraInputRef: RefObject<HTMLInputElement | null>;
   handleImageUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
   removeImage: (index: number) => void;
   handleRemoveBg: (index: number) => void;
@@ -26,6 +27,7 @@ export function PhotoGallery({
   isAnalyzing,
   removingBgIndex,
   fileInputRef,
+  cameraInputRef,
   handleImageUpload,
   removeImage,
   handleRemoveBg,
@@ -77,12 +79,28 @@ export function PhotoGallery({
           )}
 
           <button
+            onClick={() => cameraInputRef.current?.click()}
+            disabled={images.length >= 8 || isAnalyzing}
+            className="flex items-center space-x-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:shadow-md transition-all duration-200 disabled:opacity-50"
+          >
+            <Camera className="w-4 h-4" />
+            <span className="hidden sm:inline">Camera</span>
+          </button>
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            ref={cameraInputRef}
+            className="hidden"
+            onChange={handleImageUpload}
+          />
+          <button
             onClick={() => fileInputRef.current?.click()}
             disabled={images.length >= 8 || isAnalyzing}
             className="flex items-center space-x-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:shadow-md transition-all duration-200 disabled:opacity-50"
           >
             <Upload className="w-4 h-4" />
-            <span>Add Photos</span>
+            <span className="hidden sm:inline">Gallery</span>
           </button>
           <input
             type="file"
