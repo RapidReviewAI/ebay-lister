@@ -151,64 +151,61 @@ export default function BatchPage() {
    *          Completed drafts are appended to state immediately.
    */
   const handleProcess = async () => {
-    if (images.length === 0) return;
+    if (images.length === 0 || isRunning) return; // GATE 1: Prevents double-clicks & re-entry
 
     setStage("clustering");
     setErrorMsg(null);
     setListings([]);
     setProgress({ current: 0, total: 0 });
 
-    // ── Stage 1: Cluster ──────────────────────────────────────────────────
-    let clusters: Cluster[];
     try {
+      // ── Stage 1: Cluster ──────────────────────────────────────────────────
       const { data } = await axios.post<any>(
         "/api/cluster",
         { images }
       );
-      clusters = Array.isArray(data) ? data : (data.clusters || []);
-      if (!clusters?.length) throw new Error("No clusters returned.");
-    } catch (err: any) {
-      console.error("Clustering failed:", err);
-      setErrorMsg(
-        err?.response?.data?.error ??
-          "Failed to group photos into items. Please try again."
-      );
-      setStage("error");
-      return;
-    }
 
-    // ── Stage 2: Generate listings one-by-one ────────────────────────────
-    setStage("generating");
-    setProgress({ current: 0, total: clusters.length });
+      const clusters: Cluster[] = Array.isArray(data)
+        ? data
+        : (data.clusters || data.data || []);
 
-    for (let i = 0; i < clusters.length; i++) {
-      const cluster = clusters[i];
-      const clusterPhotos = cluster.photo_indices
-        .map((idx) => images[idx])
-        .filter(Boolean);
+      if (!clusters || clusters.length === 0) {
+        throw new Error(data.error || "No clusters returned from AI.");
+      }
 
-      try {
-        const { data: listing } = await axios.post(
-          "/api/generate-single",
-          { photos: clusterPhotos }
-        );
+      // ── Stage 2: Generate listings one-by-one ────────────────────────────
+      setStage("generating");
+      setProgress({ current: 0, total: clusters.length });
 
-        // Ensure the batch pipeline assigns the primary/first item photo as the headline cover photo
-        if (listing && Array.isArray(listing.photos) && clusterPhotos[0]) {
-          const firstPhoto = clusterPhotos[0];
-          listing.photos = [
-            firstPhoto,
-            ...listing.photos.filter((p: string) => p !== firstPhoto),
-          ];
-        }
+      const newListings: any[] = [];
 
-        setListings((prev) => [...prev, listing]);
-      } catch (err: any) {
-        console.error(`generate-single failed for cluster ${i}:`, err);
-        // Append a placeholder so the user knows something went wrong for this item
-        setListings((prev) => [
-          ...prev,
-          {
+      for (let i = 0; i < clusters.length; i++) {
+        const cluster = clusters[i];
+        const clusterPhotos = (cluster.photo_indices || [])
+          .map((idx) => images[idx])
+          .filter(Boolean);
+
+        if (clusterPhotos.length === 0) continue;
+
+        try {
+          const { data: listing } = await axios.post(
+            "/api/generate-single",
+            { photos: clusterPhotos }
+          );
+
+          if (listing && Array.isArray(listing.photos) && clusterPhotos[0]) {
+            const firstPhoto = clusterPhotos[0];
+            listing.photos = [
+              firstPhoto,
+              ...listing.photos.filter((p: string) => p !== firstPhoto),
+            ];
+          }
+
+          newListings.push(listing);
+          setListings([...newListings]);
+        } catch (err: any) {
+          console.error(`generate-single failed for cluster ${i}:`, err);
+          newListings.push({
             id: `error-${i}`,
             title: `⚠ Item ${i + 1} — generation failed`,
             photos: clusterPhotos,
@@ -216,14 +213,23 @@ export default function BatchPage() {
             category: "",
             categoryId: "",
             condition: "4000",
-          },
-        ]);
+          });
+          setListings([...newListings]);
+        }
+
+        setProgress({ current: i + 1, total: clusters.length });
       }
 
-      setProgress({ current: i + 1, total: clusters.length });
+      setStage("done");
+    } catch (err: any) {
+      console.error("Batch processing failed:", err);
+      setErrorMsg(
+        err?.response?.data?.error ??
+        err?.message ??
+        "Failed to process batch photos. Please try again."
+      );
+      setStage("error");
     }
-
-    setStage("done");
   };
 
   // ── CSV export ───────────────────────────────────────────────────────────
