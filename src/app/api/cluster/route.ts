@@ -1,106 +1,75 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { NextRequest, NextResponse } from "next/server";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
 const genAI = new GoogleGenerativeAI(
   process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ""
 );
 
-const schema = {
-  type: SchemaType.ARRAY,
-  items: {
-    type: SchemaType.OBJECT,
-    properties: {
-      itemTitle: {
-        type: SchemaType.STRING,
-        description: "A descriptive 5-8 word title for the item cluster",
-      },
-      imageUrls: {
-        type: SchemaType.ARRAY,
-        items: { type: SchemaType.STRING },
-        description: "The URLs of the images that belong to this specific item",
-      },
-    },
-    required: ["itemTitle", "imageUrls"],
-  },
-};
-
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const apiKey = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
-
-    if (!apiKey) {
-      return NextResponse.json({ error: "API Key missing." }, { status: 500 });
-    }
-
-    let { images } = body;
+    const { images } = await req.json();
 
     if (!images || !Array.isArray(images) || images.length === 0) {
-      return NextResponse.json({ error: "No images provided." }, { status: 400 });
+      return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
-
-    const cleanUrls = images.map((img: any) => {
-      if (typeof img === 'string') return img;
-      if (typeof img === 'object' && img && img.url) return img.url;
-      return null;
-    }).filter((u: any) => u !== null) as string[];
-
-    const imageParts = await Promise.all(
-      cleanUrls.map(async (url: string) => {
-        try {
-          let base64Data = url;
-          let mimeType = "image/jpeg";
-
-          if (url.startsWith("http://") || url.startsWith("https://")) {
-            const res = await fetch(url);
-            if (!res.ok) return null;
-            const buffer = await res.arrayBuffer();
-            base64Data = Buffer.from(buffer).toString('base64');
-            const contentType = res.headers.get("content-type");
-            if (contentType) mimeType = contentType;
-          } else if (url.startsWith("data:")) {
-            const matches = url.match(/^data:(image\/\w+);base64,(.+)$/);
-            if (matches) {
-              mimeType = matches[1];
-              base64Data = matches[2];
-            }
-          }
-
-          return {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType
-            }
-          };
-        } catch (e) {
-          return null;
-        }
-      })
-    ).then(res => res.filter(p => p !== null));
-
-    const promptPart = {
-      text: "Task: Group these images by unique product. Return a JSON array of objects with keys itemTitle and imageUrls."
-    };
-
-    const parts = [...imageParts, promptPart];
 
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
+    // 1. Properly format the image parts
+    const imageParts = await Promise.all(
+      images.map(async (imgStr: string) => {
+        let b64Data = imgStr;
+        let mimeType = "image/jpeg";
+
+        if (imgStr.startsWith("http")) {
+          const response = await fetch(imgStr);
+          const buffer = await response.arrayBuffer();
+          b64Data = Buffer.from(buffer).toString("base64");
+          mimeType = response.headers.get("content-type") || "image/jpeg";
+        } else if (imgStr.includes(";base64,")) {
+          b64Data = imgStr.split(";base64,")[1];
+          mimeType = imgStr.split(";base64,")[0].split(":")[1];
+        }
+
+        return {
+          inlineData: {
+            data: b64Data,
+            mimeType
+          }
+        };
+      })
+    );
+
+    // 2. Define the Prompt based on the route
+    const prompt = "Group these images into distinct products. Return a JSON object with key 'clusters' containing an array of objects: { \"clusters\": [{ \"id\": \"1\", \"title\": \"Steelers Shirt\", \"photo_indices\": [0, 2] }] }";
+
+    // 3. The CORRECT SDK Call Structure
     const result = await model.generateContent({
-      contents: [{ role: "user", parts: parts as any }],
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: prompt },
+            ...imageParts
+          ]
+        }
+      ],
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: schema as any,
-      },
+      }
     });
 
     const responseText = result.response.text();
-    const cleanJson = JSON.parse(responseText.replace(/```json|```/g, ""));
+    const json = JSON.parse(responseText);
 
-    return NextResponse.json(cleanJson);
+    if (Array.isArray(json)) {
+      return NextResponse.json({ clusters: json });
+    }
+
+    return NextResponse.json(json);
 
   } catch (error: any) {
-    console.error("🚨 CLUSTER ROUTE FAILURE:", error);
+    console.error("Gemini Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
