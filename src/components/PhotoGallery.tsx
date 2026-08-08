@@ -165,7 +165,7 @@ export function PhotoGallery({
                   </div>
                 )}
 
-                {!removingBgIndex && !isAnalyzing && (
+                {removingBgIndex === null && !isAnalyzing && (
                   <div className="absolute top-0 right-0 p-1.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity duration-200 flex flex-col gap-2 z-10">
                     <button
                       onClick={() => removeImage(idx)}

@@ -3,6 +3,8 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export const maxDuration = 60;
+
 const schema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -15,7 +17,7 @@ export async function POST(req: NextRequest) {
   try {
     const { title, condition, item_specifics } = await req.json();
 
-    const systemInstruction = "You are an expert reseller item descriptor. Write a highly engaging, professional, and accurate eBay description for the item. Be concise but highlight the item's appeal. Write in PLAIN TEXT ONLY. DO NOT use any HTML tags like <p>, <strong>, or <ul>. Use standard line breaks and spacing.";
+    const systemInstruction = "You are an expert reseller item descriptor. Write a highly engaging, professional, and accurate eBay description for the item. Be concise but highlight the item's appeal. Generate clean, structured HTML output suitable for dangerouslySetInnerHTML. Use semantic tags like <p>, <strong>, <ul>, and <li>. Do not use markdown wrappers.";
     
     const prompt = `Write a description for this item:
 Title: ${title}
@@ -23,7 +25,7 @@ Condition: ${condition}
 Item Specifics: ${JSON.stringify(item_specifics)}`;
 
     let responseText = null;
-    const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
     
     for (const model of modelsToTry) {
       try {

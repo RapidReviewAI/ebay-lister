@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import axios from "axios";
 import * as cheerio from "cheerio";
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const { key_search_keywords, condition } = await req.json();

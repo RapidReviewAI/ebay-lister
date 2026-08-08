@@ -4,6 +4,8 @@ import React, { useState, useRef } from "react";
 import { Upload, Camera, Loader2, Download, Home, Package } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
+import { handleImageUploadUtility } from "@/lib/uploadImage";
+import { sanitizeEbayText } from "@/lib/sanitize";
 
 export default function BatchPage() {
   const [images, setImages] = useState<string[]>([]);
@@ -16,53 +18,10 @@ export default function BatchPage() {
       const newFiles = Array.from(e.target.files);
       const newUrls: string[] = [];
 
-      for (const file of newFiles) {
-        try {
-          const compressedDataUrl = await new Promise<string>((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              let { width, height } = img;
-              const maxDimension = 1200;
-
-              if (width > maxDimension || height > maxDimension) {
-                if (width > height) {
-                  height = (height / width) * maxDimension;
-                  width = maxDimension;
-                } else {
-                  width = (width / height) * maxDimension;
-                  height = maxDimension;
-                }
-              }
-
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext("2d");
-              if (!ctx) {
-                reject(new Error("Could not get 2d context"));
-                return;
-              }
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL("image/jpeg", 0.8));
-            };
-            img.onerror = reject;
-            img.src = URL.createObjectURL(file);
-          });
-
-          const uploadRes = await fetch("/api/upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: compressedDataUrl })
-          });
-          const uploadData = await uploadRes.json();
-
-          if (uploadData.url) {
-            newUrls.push(uploadData.url);
-          }
-        } catch (error) {
-          console.error("Image compression failed:", error);
-        }
-      }
+      await handleImageUploadUtility(
+        newFiles,
+        (url) => newUrls.push(url)
+      );
 
       if (newUrls.length > 0) {
         setImages((prev) => [...prev, ...newUrls]);
@@ -95,8 +54,8 @@ export default function BatchPage() {
       csvContent += "Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8),Category,Title,Description,ConditionID,PicURL,Quantity,Format,StartPrice,BuyItNowPrice,Duration,Location,ShippingProfileName,ReturnProfileName,PaymentProfileName\n";
       listings.forEach(listing => {
         const categoryId = String(listing.categoryId || '260010').replace(/[^0-9]/g, '');
-        const title = (listing.title || "").substring(0, 80).replace(/"/g, '""');
-        const description = (listing.description || "").replace(/"/g, '""');
+        const title = sanitizeEbayText(listing.title || "", true).replace(/"/g, '""');
+        const description = sanitizeEbayText(listing.description || "").replace(/"/g, '""');
         const condition = listing.condition || "4000";
         const pics = (listing.photos || []).join("|");
         const price = listing.price || "19.99";

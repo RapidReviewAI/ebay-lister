@@ -3,6 +3,8 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export const maxDuration = 60;
+
 const schema: Schema = {
   type: Type.ARRAY,
   items: {
@@ -15,6 +17,10 @@ const schema: Schema = {
       category: { type: Type.STRING },
       categoryId: { type: Type.STRING },
       condition: { type: Type.STRING },
+      brand: { type: Type.STRING },
+      size: { type: Type.STRING },
+      color: { type: Type.STRING },
+      department: { type: Type.STRING },
       photo_indices: { 
         type: Type.ARRAY,
         items: { type: Type.NUMBER }
@@ -47,6 +53,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "No images provided" }, { status: 400 });
     }
 
+    if (images.length > 30) {
+      return NextResponse.json({ error: "Batch size limit is 30 images per request." }, { status: 400 });
+    }
+
     const systemInstruction = `
 You are an expert reseller operations AI. You will receive an array of uploaded photos representing a batch folder dump of items.
 Your job is to visually cluster these photos into distinct individual listings based on continuity (e.g., front, back, tag of Item A, then front, back of Item B).
@@ -59,6 +69,7 @@ CRITICAL GUIDELINES:
 4. Prohibited Keywords: NEVER generate text containing: 'cbd', 'hemp', 'replica', 'fake', 'weapon', 'ammo', etc.
 5. Provide a unique string 'id' for each item.
 6. Provide an estimated 'price' in USD (e.g., "19.99").
+7. Extract and provide 'brand', 'size', 'color', and 'department' for each item. If unknown, use "Unbranded" or "N/A".
 `;
 
     const parts = await Promise.all(images.map(async (imgStr: string, idx: number) => {
@@ -89,7 +100,7 @@ CRITICAL GUIDELINES:
     } as any);
 
     let responseText = null;
-    const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
     
     for (const model of modelsToTry) {
       let attempts = 0;

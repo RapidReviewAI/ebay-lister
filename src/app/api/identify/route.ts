@@ -3,6 +3,8 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export const maxDuration = 60;
+
 const schema: Schema = {
   type: Type.OBJECT,
   properties: {
@@ -104,7 +106,7 @@ CRITICAL SEO & OUTPUT GUIDELINES:
     } as any);
 
     let responseText = null;
-    const modelsToTry = ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-2.5-flash"];
+    const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"];
     
     for (const model of modelsToTry) {
       let attempts = 0;

@@ -8,6 +8,8 @@ import { PhotoRole, PricingStrategy, Identification, CompsData, ItemSpecific } f
 import { PhotoGallery } from "@/components/PhotoGallery";
 import { MarketComps } from "@/components/MarketComps";
 import { ShippingSection } from "@/components/ShippingSection";
+import { handleImageUploadUtility } from "@/lib/uploadImage";
+import { sanitizeEbayText } from "@/lib/sanitize";
 
 export default function Home() {
   const [images, setImages] = useState<string[]>([]);
@@ -60,54 +62,13 @@ export default function Home() {
       const newUrls: string[] = [];
       const newRoles: string[] = [];
 
-      for (const file of filesToProcess) {
-        try {
-          const compressedDataUrl = await new Promise<string>((resolve, reject) => {
-            const img = new Image();
-            img.onload = () => {
-              const canvas = document.createElement("canvas");
-              let { width, height } = img;
-              const maxDimension = 1200;
-
-              if (width > maxDimension || height > maxDimension) {
-                if (width > height) {
-                  height = (height / width) * maxDimension;
-                  width = maxDimension;
-                } else {
-                  width = (width / height) * maxDimension;
-                  height = maxDimension;
-                }
-              }
-
-              canvas.width = width;
-              canvas.height = height;
-              const ctx = canvas.getContext("2d");
-              if (!ctx) {
-                reject(new Error("Could not get 2d context"));
-                return;
-              }
-              ctx.drawImage(img, 0, 0, width, height);
-              resolve(canvas.toDataURL("image/jpeg", 0.8));
-            };
-            img.onerror = reject;
-            img.src = URL.createObjectURL(file);
-          });
-
-          const uploadRes = await fetch("/api/upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ image: compressedDataUrl })
-          });
-          const uploadData = await uploadRes.json();
-
-          if (uploadData.url && typeof uploadData.url === 'string' && uploadData.url.trim().length > 0) {
-            newUrls.push(uploadData.url);
-            newRoles.push("");
-          }
-        } catch (error) {
-          console.error("Image compression failed:", error);
+      await handleImageUploadUtility(
+        filesToProcess,
+        (url) => {
+          newUrls.push(url);
+          newRoles.push("");
         }
-      }
+      );
 
       if (newUrls.length > 0) {
         setImages((prev) => [...prev, ...newUrls]);
@@ -381,28 +342,7 @@ export default function Home() {
 
     const cleanCell = (val: any) => `"${String(val ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""')}"`;
 
-    const sanitizeEbayText = (text: string, isTitle: boolean = false): string => {
-      if (!text) return "";
-      
-      const PROHIBITED_WORDS = [
-        /cbd/gi, /hemp/gi, /cannabis/gi, /vape/gi, /tobacco/gi,
-        /replica/gi, /knockoff/gi, /counterfeit/gi, /fake/gi,
-        /weapon/gi, /knife/gi, /blade/gi, /firearm/gi, /ammo/gi
-      ];
 
-      let cleaned = text;
-      PROHIBITED_WORDS.forEach((pattern) => {
-        cleaned = cleaned.replace(pattern, "");
-      });
-
-      cleaned = cleaned.replace(/\s+/g, " ").trim();
-
-      if (isTitle && cleaned.length > 80) {
-        cleaned = cleaned.substring(0, 80);
-      }
-      
-      return cleaned;
-    };
 
     const headers = [
       "Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)",
@@ -444,7 +384,7 @@ export default function Home() {
       "", // BuyItNowPrice
       "GTC", // Duration
       "United States", // Location
-      "49286", // PostalCode
+      process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286", // PostalCode
       shippingProfileName || "Standard Shipping", // ShippingProfileName
       returnProfileName || "No Returns", // ReturnProfileName
       paymentProfileName || "eBay Payments", // PaymentProfileName
