@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { Check, AlertCircle, RefreshCw, Package, Tag, Download, Home as HomeIcon } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Check, AlertCircle, RefreshCw, Package, Tag, Download, Home as HomeIcon, Settings } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
 import { PhotoRole, PricingStrategy, Identification, CompsData, ItemSpecific } from "@/types/listing";
@@ -10,6 +10,10 @@ import { MarketComps } from "@/components/MarketComps";
 import { ShippingSection } from "@/components/ShippingSection";
 import { handleImageUploadUtility } from "@/lib/uploadImage";
 import { sanitizeEbayText } from "@/lib/sanitize";
+import { createClient } from "@/lib/supabase/client";
+import { generateEbayCSV } from "@/lib/exporters/ebay";
+import { SettingsModal } from "@/components/SettingsModal";
+import { Profile, MasterItem } from "@/types/inventory";
 
 export default function Home() {
   const [images, setImages] = useState<string[]>([]);
@@ -49,6 +53,78 @@ export default function Home() {
   const [returnProfileName, setReturnProfileName] = useState("");
   const [paymentProfileName, setPaymentProfileName] = useState("");
   const [itemSpecifics, setItemSpecifics] = useState<ItemSpecific[]>([]);
+  const [dbListingId, setDbListingId] = useState<string | null>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    async function loadProfile() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (data) {
+        if (data.default_shipping_profile) setShippingProfileName(data.default_shipping_profile);
+        if (data.default_return_policy) setReturnProfileName(data.default_return_policy);
+        if (data.default_payment_policy) setPaymentProfileName(data.default_payment_policy);
+        if (data.default_handling_time) setHandlingTime(data.default_handling_time);
+      }
+    }
+    loadProfile();
+  }, []);
+
+  useEffect(() => {
+    if (!identification) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const payload = {
+          id: dbListingId || undefined,
+          user_id: user.id,
+          title: identification.title || "Untitled Listing",
+          description: identification.description || "",
+          price: identification.price ? parseFloat(String(identification.price).replace(/[^0-9.]/g, '')) || 0 : 0,
+          condition: identification.condition || "Used",
+          category: identification.category || "Unknown",
+          specifics: {
+            brand: identification.brand || "",
+            department: identification.department || "",
+            size: identification.size || "",
+            color: identification.color || "",
+            sizeType: identification.sizeType || "",
+            weightOz: identification.weightOz || "",
+            item_specifics: itemSpecifics,
+          },
+          photos: images,
+        };
+
+        const { data, error } = await supabase
+          .from("listings")
+          .upsert(payload, { onConflict: "id" })
+          .select()
+          .single();
+
+        if (error) {
+          console.error("Error saving listing to Supabase:", error);
+        } else if (data && !dbListingId) {
+          setDbListingId(data.id);
+        }
+      } catch (err) {
+        console.error("Failed to save listing to Supabase:", err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [identification, images, itemSpecifics, dbListingId]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -292,7 +368,7 @@ export default function Home() {
     setItemSpecifics([...itemSpecifics, { name: "", value: "" }]);
   };
 
-  const handleExportCSV = () => {
+  const handleExportCSV = async () => {
     if (!identification) return;
     
     const validImages = images.filter((img) => typeof img === 'string' && img.trim().length > 0);
@@ -334,76 +410,46 @@ export default function Home() {
 
     const finalCategory = resolveEbayLeafCategory(identification.categoryId || identification.category, identification.title);
 
-    const formatPrice = (val: any): string => {
-      const cleaned = String(val ?? '').replace(/[^0-9.]/g, '');
-      const num = parseFloat(cleaned);
-      return isNaN(num) || num <= 0 ? "19.99" : num.toFixed(2);
+    // Fetch user profile from Supabase
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    let userProfile: Profile = {
+      id: '',
+      user_id: user?.id || '',
+      ai_credits_used: 0,
+      updated_at: '',
+      default_postal_code: process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286",
+      default_shipping_profile: shippingProfileName || "Standard Shipping",
+      default_return_policy: returnProfileName || "No Returns",
+      default_handling_time: handlingTime || "1",
+      default_payment_policy: paymentProfileName || "eBay Payments",
     };
 
-    const cleanCell = (val: any) => `"${String(val ?? '').replace(/[\r\n]+/g, ' ').replace(/"/g, '""')}"`;
+    if (user) {
+      const { data } = await supabase.from('profiles').select('*').eq('user_id', user.id).single();
+      if (data) {
+        userProfile = { ...userProfile, ...data };
+      }
+    }
 
+    const masterItem: MasterItem = {
+      id: dbListingId || 'temp-id',
+      title: identification.title || '',
+      description: identification.description || '',
+      price: identification.price || '19.99',
+      category: identification.category || '',
+      categoryId: finalCategory,
+      condition: conditionId,
+      photos: validPublicUrls,
+      brand: identification.brand || 'Unbranded',
+      size: identification.size || 'L',
+      color: identification.color || 'Black',
+      department: identification.department || 'Men',
+      weightOz: String(identification.weightOz || '8'),
+      sizeType: identification.sizeType || 'Regular',
+    };
 
-
-    const headers = [
-      "Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)",
-      "Category",
-      "Title",
-      "Description",
-      "ConditionID",
-      "PicURL",
-      "Quantity",
-      "Format",
-      "StartPrice",
-      "BuyItNowPrice",
-      "Duration",
-      "Location",
-      "PostalCode",
-      "ShippingProfileName",
-      "ReturnProfileName",
-      "PaymentProfileName",
-      "WeightMajor",
-      "WeightMinor",
-      "WeightUnit",
-      "C:Brand",
-      "C:Department",
-      "C:Size",
-      "C:Color",
-      "C:Size Type"
-    ];
-
-    const row = [
-      "Add",
-      finalCategory,
-      sanitizeEbayText(identification.title || "", true),
-      sanitizeEbayText(identification.description || ""),
-      "3000", // ConditionID
-      validImages.join("|"),
-      quantity ? String(quantity) : "1", // Quantity
-      "FixedPrice", // Format
-      formatPrice(identification.price), // StartPrice
-      "", // BuyItNowPrice
-      "GTC", // Duration
-      "United States", // Location
-      process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286", // PostalCode
-      shippingProfileName || "Standard Shipping", // ShippingProfileName
-      returnProfileName || "No Returns", // ReturnProfileName
-      paymentProfileName || "eBay Payments", // PaymentProfileName
-      "0", // WeightMajor
-      String(identification.weightOz || "8"), // WeightMinor
-      "oz", // WeightUnit
-      identification.brand || "Unbranded", // C:Brand
-      identification.department || "Men", // C:Department
-      identification.size || "L", // C:Size
-      identification.color || "Black", // C:Color
-      identification.sizeType || "Regular" // C:Size Type
-    ].map(cleanCell);
-
-    const csvContent = headers.join(",") + "\n" + row.join(",");
-    console.log("EXPORTING CSV ROW PRICES:", {
-      raw: identification.price,
-      startPrice: formatPrice(identification.price),
-    });
-    console.log("GENERATED CSV ROW:", csvContent);
+    const csvContent = generateEbayCSV([masterItem], userProfile);
     
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -474,6 +520,13 @@ export default function Home() {
               <Package className="w-4 h-4" />
               Bulk Mode
             </Link>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </nav>
           {identification && !publishedListing && (
              <div className="hidden md:flex items-center gap-2 mt-4 md:mt-0 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full border border-emerald-200 shadow-sm">
@@ -854,6 +907,7 @@ export default function Home() {
           </div>
         </div>
       </div>
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </main>
   );
 }

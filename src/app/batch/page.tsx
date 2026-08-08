@@ -1,17 +1,82 @@
 "use client";
 
-import React, { useState, useRef } from "react";
-import { Upload, Camera, Loader2, Download, Home, Package } from "lucide-react";
+import React, { useState, useRef, useEffect } from "react";
+import { Upload, Camera, Loader2, Download, Home, Package, Settings } from "lucide-react";
 import Link from "next/link";
 import axios from "axios";
 import { handleImageUploadUtility } from "@/lib/uploadImage";
 import { sanitizeEbayText } from "@/lib/sanitize";
+import { createClient } from "@/lib/supabase/client";
+import { generateEbayCSV } from "@/lib/exporters/ebay";
+import { generateWhatnotCSV } from "@/lib/exporters/whatnot";
+import { SettingsModal } from "@/components/SettingsModal";
+import { Profile, MasterItem } from "@/types/inventory";
 
 export default function BatchPage() {
   const [images, setImages] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [listings, setListings] = useState<any[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    if (listings.length === 0) return;
+
+    const timer = setTimeout(async () => {
+      try {
+        const supabase = createClient();
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const listingsToSave = listings.map(l => ({
+          id: l.id || undefined,
+          user_id: user.id,
+          title: l.title || "Untitled Bulk Listing",
+          description: l.description || "",
+          price: l.price ? parseFloat(String(l.price).replace(/[^0-9.]/g, '')) || 0 : 0,
+          condition: l.condition || "4000",
+          category: l.category || "Unknown",
+          specifics: {
+            brand: l.brand || "",
+            department: l.department || "",
+            size: l.size || "",
+            color: l.color || "",
+            sizeType: l.sizeType || "",
+            weightOz: l.weightOz || "",
+            item_specifics: l.item_specifics || [],
+          },
+          photos: l.photos || [],
+        }));
+
+        const { data, error } = await supabase
+          .from("listings")
+          .upsert(listingsToSave, { onConflict: "id" })
+          .select("id, title, photos");
+
+        if (error) {
+          console.error("Error saving batch listings:", error);
+        } else if (data && data.length > 0) {
+          const updatedListings = listings.map((l) => {
+            if (l.id) return l;
+            const savedItem = data.find((d: any) => d.title === l.title && d.photos.join(",") === (l.photos || []).join(","));
+            return {
+              ...l,
+              id: savedItem ? savedItem.id : undefined
+            };
+          });
+          
+          const hasNewIds = updatedListings.some((l, idx) => l.id !== listings[idx].id);
+          if (hasNewIds) {
+            setListings(updatedListings);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to auto-save batch listings:", err);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [listings]);
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -45,37 +110,59 @@ export default function BatchPage() {
     }
   };
 
-  const handleExportCSV = (platform: "ebay" | "whatnot") => {
+  const handleExportCSV = async (platform: "ebay" | "whatnot") => {
     if (listings.length === 0) return;
 
-    let csvContent = "data:text/csv;charset=utf-8,";
-    
-    if (platform === "ebay") {
-      csvContent += "Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8),Category,Title,Description,ConditionID,PicURL,Quantity,Format,StartPrice,BuyItNowPrice,Duration,Location,ShippingProfileName,ReturnProfileName,PaymentProfileName\n";
-      listings.forEach(listing => {
-        const categoryId = String(listing.categoryId || '260010').replace(/[^0-9]/g, '');
-        const title = sanitizeEbayText(listing.title || "", true).replace(/"/g, '""');
-        const description = sanitizeEbayText(listing.description || "").replace(/"/g, '""');
-        const condition = listing.condition || "4000";
-        const pics = (listing.photos || []).join("|");
-        const price = listing.price || "19.99";
+    const items: MasterItem[] = listings.map((l, idx) => ({
+      id: l.id || `temp-id-${idx}`,
+      title: l.title || "",
+      description: l.description || "",
+      price: l.price || "19.99",
+      category: l.category || "",
+      categoryId: l.categoryId || "260010",
+      condition: l.condition || "4000",
+      photos: l.photos || [],
+      brand: l.brand,
+      size: l.size,
+      color: l.color,
+      department: l.department,
+      weightOz: l.weightOz,
+      sizeType: l.sizeType,
+    }));
 
-        csvContent += `Add,${categoryId},"${title}","${description}",${condition},"${pics}",1,FixedPrice,,${price},GTC,US,,,,\n`;
-      });
+    let csvContent = "";
+
+    if (platform === "ebay") {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      let userProfile: Profile = {
+        id: "",
+        user_id: user?.id || "",
+        ai_credits_used: 0,
+        updated_at: "",
+        default_postal_code: process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286",
+        default_shipping_profile: "Standard Shipping",
+        default_return_policy: "No Returns",
+        default_handling_time: "1",
+        default_payment_policy: "eBay Payments",
+      };
+
+      if (user) {
+        const { data } = await supabase.from('profiles').select('*').eq('user_id', user.id).single();
+        if (data) {
+          userProfile = { ...userProfile, ...data };
+        }
+      }
+
+      csvContent = generateEbayCSV(items, userProfile);
     } else {
-      csvContent += "Title,Description,Price,Quantity,Category\n";
-      listings.forEach(listing => {
-        const title = (listing.title || "").substring(0, 80).replace(/"/g, '""');
-        const description = (listing.description || "").replace(/"/g, '""');
-        const price = listing.price || "19.99";
-        const category = listing.category || "";
-        csvContent += `"${title}","${description}",${price},1,"${category}"\n`;
-      });
+      csvContent = generateWhatnotCSV(items);
     }
 
-    const encodedUri = encodeURI(csvContent);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
+    link.setAttribute("href", url);
     link.setAttribute("download", `${platform}_bulk_export.csv`);
     document.body.appendChild(link);
     link.click();
@@ -104,6 +191,13 @@ export default function BatchPage() {
               <Upload className="w-4 h-4" />
               Bulk Mode
             </div>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
+              title="Settings"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
           </nav>
         </div>
       </header>
@@ -229,6 +323,7 @@ export default function BatchPage() {
           </section>
         )}
       </main>
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 }
