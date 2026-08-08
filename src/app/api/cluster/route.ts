@@ -41,10 +41,34 @@ Rules:
 - Do NOT generate titles, prices, or descriptions — only cluster the indices.
 `.trim();
 
-async function imageUrlToInlineData(imgStr: string) {
+/** Convert any supported image string to a Gemini inlineData part.
+ *  Strips data-URI prefixes before passing raw base64 to the API. */
+function imageToInlinePart(imgStr: string): object {
+  // HTTPS/HTTP URL — fetch and re-encode as base64
   if (imgStr.startsWith("http://") || imgStr.startsWith("https://")) {
-    const res = await fetch(imgStr);
-    const buf = await res.arrayBuffer();
+    // Caller must await — handled below with Promise.all
+    throw new Error("URL images must be handled via imageUrlToInlinePart");
+  }
+
+  // Data URI: "data:image/jpeg;base64,<base64>"
+  if (imgStr.startsWith("data:")) {
+    const commaIdx = imgStr.indexOf(",");
+    const header   = imgStr.slice(0, commaIdx);          // "data:image/jpeg;base64"
+    const mimeType = header.split(":")[1]?.split(";")[0] ?? "image/jpeg";
+    // Strip the "data:...,base64," prefix — Gemini wants raw base64 only
+    const cleanBase64 = imgStr.slice(commaIdx + 1);
+    return { inlineData: { data: cleanBase64, mimeType } };
+  }
+
+  // Plain base64 (no prefix)
+  const cleanBase64 = imgStr.replace(/^data:image\/\w+;base64,/, "");
+  return { inlineData: { data: cleanBase64, mimeType: "image/jpeg" } };
+}
+
+async function imageUrlToInlinePart(imgStr: string): Promise<object> {
+  if (imgStr.startsWith("http://") || imgStr.startsWith("https://")) {
+    const res  = await fetch(imgStr);
+    const buf  = await res.arrayBuffer();
     return {
       inlineData: {
         data: Buffer.from(buf).toString("base64"),
@@ -52,17 +76,7 @@ async function imageUrlToInlineData(imgStr: string) {
       },
     };
   }
-  if (imgStr.includes(",")) {
-    const [header, data] = imgStr.split(",");
-    return {
-      inlineData: {
-        data,
-        mimeType: header.split(":")[1].split(";")[0],
-      },
-    };
-  }
-  // Plain base64 fallback
-  return { inlineData: { data: imgStr, mimeType: "image/jpeg" } };
+  return imageToInlinePart(imgStr);
 }
 
 export async function POST(req: NextRequest) {
@@ -86,8 +100,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build inline-data parts for every image
-    const imageParts = await Promise.all(images.map(imageUrlToInlineData));
+    // Build inline-data parts — strip any data-URI prefix before sending
+    const imageParts = await Promise.all(images.map(imageUrlToInlinePart));
 
     const parts: any[] = [
       {
@@ -98,46 +112,30 @@ export async function POST(req: NextRequest) {
       ...imageParts,
     ];
 
-    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
-    let responseText: string | null = null;
+    // Single model — no retry loop, no fallback chain
+    const res = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: parts,
+      config: {
+        systemInstruction: SYSTEM_INSTRUCTION,
+        responseMimeType: "application/json",
+        responseSchema: clusterSchema,
+      },
+    });
 
-    for (const model of MODELS) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const res = await ai.models.generateContent({
-            model,
-            contents: parts,
-            config: {
-              systemInstruction: SYSTEM_INSTRUCTION,
-              responseMimeType: "application/json",
-              responseSchema: clusterSchema,
-            },
-          });
-          if (res.text) {
-            responseText = res.text;
-            break;
-          }
-        } catch (err: any) {
-          console.error(`[cluster] ${model} attempt ${attempt + 1}:`, err.message);
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, Math.pow(2, attempt) * 1000));
-          }
-        }
-      }
-      if (responseText) break;
-    }
-
-    if (!responseText) {
+    if (!res.text) {
       return NextResponse.json(
-        { error: "Vision service unavailable. Please retry in a moment." },
-        { status: 503 }
+        { error: "Model returned an empty response." },
+        { status: 502 }
       );
     }
 
-    const { clusters } = JSON.parse(responseText);
+    const { clusters } = JSON.parse(res.text);
     return NextResponse.json({ clusters });
-  } catch (err: any) {
-    console.error("[cluster] Unhandled error:", err.message);
+
+  } catch (error) {
+    // Log the raw exception so Vercel surfaces the full detail
+    console.error("[cluster error]:", error);
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }
 }
