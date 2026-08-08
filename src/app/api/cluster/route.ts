@@ -10,11 +10,11 @@ export async function POST(req: NextRequest) {
     }
 
     if (!API_KEY) {
-      return NextResponse.json({ error: "API Key is missing from environment variables." }, { status: 500 });
+      return NextResponse.json({ error: "API Key missing." }, { status: 500 });
     }
 
     const parts: any[] = [];
-    parts.push({ text: "Cluster these images into distinct items. Return a JSON array: [{ 'id': '1', 'title': 'Item Name', 'photo_indices': [0, 1] }]" });
+    parts.push({ text: "Cluster these images into distinct items. Return JSON: [{id, title, photo_indices}]" });
 
     for (const img of images) {
       let b64 = img;
@@ -40,8 +40,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Using gemini-1.5-flash-latest which is the most resilient alias in v1beta
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+    // SWITCHING TO V1 (STABLE) ENDPOINT
+    const modelName = "gemini-1.5-flash";
+    const endpoint = `https://generativelanguage.googleapis.com/v1/models/${modelName}:generateContent?key=${API_KEY}`;
     
     const response = await fetch(endpoint, {
       method: "POST",
@@ -49,8 +50,7 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         contents: [{ role: "user", parts }],
         generationConfig: { 
-          responseMimeType: "application/json",
-          temperature: 0.1 // Keep it focused
+          responseMimeType: "application/json"
         }
       })
     });
@@ -58,16 +58,17 @@ export async function POST(req: NextRequest) {
     const result = await response.json();
 
     if (result.error) {
-      console.error("GEMINI API ERROR:", result.error);
+      console.error("STABLE API ERROR:", result.error);
+      // If V1 fails, we return the full error so we can see exactly what Google is complaining about
       return NextResponse.json({ 
         error: result.error.message, 
-        code: result.error.code,
-        frank_v: 6 
+        status: result.error.status,
+        frank_v: 7 
       }, { status: 400 });
     }
 
     if (!result.candidates?.[0]?.content?.parts?.[0]?.text) {
-      throw new Error("AI returned an empty response. Check image sizes.");
+      throw new Error("AI returned an empty response.");
     }
 
     const text = result.candidates[0].content.parts[0].text;
@@ -76,6 +77,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(parsed);
 
   } catch (error: any) {
-    return NextResponse.json({ error: error.message, frank_v: 6 }, { status: 500 });
+    return NextResponse.json({ error: error.message, frank_v: 7 }, { status: 500 });
   }
 }
