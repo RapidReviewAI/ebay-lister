@@ -16,6 +16,8 @@ interface PhotoGalleryProps {
   triggerIdentify: (deepInspection: boolean) => void;
   identification: any;
   error: string | null;
+  canvasBg: string;
+  setCanvasBg: (color: string) => void;
 }
 
 export function PhotoGallery({
@@ -32,31 +34,65 @@ export function PhotoGallery({
   handleDrop,
   triggerIdentify,
   identification,
-  error
+  error,
+  canvasBg,
+  setCanvasBg
 }: PhotoGalleryProps) {
   return (
     <section className="glass rounded-2xl p-6 shadow-xl shadow-slate-200/50">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3">
         <h2 className="text-sm font-bold uppercase tracking-widest text-slate-700 flex items-center gap-2">
           <Camera className="w-4 h-4" />
           Product Media ({images.length}/8)
         </h2>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          disabled={images.length >= 8 || isAnalyzing}
-          className="flex items-center space-x-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:shadow-md transition-all duration-200 disabled:opacity-50"
-        >
-          <Upload className="w-4 h-4" />
-          <span>Add Photos</span>
-        </button>
-        <input
-          type="file"
-          accept="image/*"
-          multiple
-          ref={fileInputRef}
-          className="hidden"
-          onChange={handleImageUpload}
-        />
+        
+        <div className="flex flex-wrap items-center gap-3">
+          {images.length > 0 && (
+            <div className="flex items-center text-xs text-slate-500 font-semibold bg-slate-100 rounded-lg p-1">
+              <button
+                onClick={() => setCanvasBg('transparent')}
+                className={`px-3 py-1.5 rounded-md transition-colors ${canvasBg === 'transparent' ? 'bg-white shadow-sm text-slate-800' : 'hover:bg-slate-200'}`}
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setCanvasBg('#FFFFFF')}
+                className={`px-3 py-1.5 rounded-md transition-colors ${canvasBg === '#FFFFFF' ? 'bg-white shadow-sm text-slate-800' : 'hover:bg-slate-200'}`}
+              >
+                White
+              </button>
+              <button
+                onClick={() => setCanvasBg('#F3F4F6')}
+                className={`px-3 py-1.5 rounded-md transition-colors ${canvasBg === '#F3F4F6' ? 'bg-white shadow-sm text-slate-800' : 'hover:bg-slate-200'}`}
+              >
+                Light
+              </button>
+              <button
+                onClick={() => setCanvasBg('#1F2937')}
+                className={`px-3 py-1.5 rounded-md transition-colors ${canvasBg === '#1F2937' ? 'bg-slate-800 shadow-sm text-white' : 'hover:bg-slate-200'}`}
+              >
+                Dark
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={images.length >= 8 || isAnalyzing}
+            className="flex items-center space-x-2 bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-sm font-semibold hover:bg-indigo-100 hover:shadow-md transition-all duration-200 disabled:opacity-50"
+          >
+            <Upload className="w-4 h-4" />
+            <span>Add Photos</span>
+          </button>
+          <input
+            type="file"
+            accept="image/*"
+            multiple
+            ref={fileInputRef}
+            className="hidden"
+            onChange={handleImageUpload}
+          />
+        </div>
       </div>
 
       {images.length > 0 ? (
@@ -82,7 +118,10 @@ export function PhotoGallery({
                 <img
                   src={src}
                   alt={`Upload ${idx}`}
+                  style={{ backgroundColor: canvasBg !== 'transparent' ? canvasBg : undefined }}
                   className={`w-full h-full object-cover transition-transform duration-300 group-hover:scale-105 ${
+                    canvasBg === 'transparent' ? 'bg-[url("data:image/svg+xml,%3Csvg width=\'12\' height=\'12\' viewBox=\'0 0 12 12\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M0 0h6v6H0V0zm6 6h6v6H6V6z\' fill=\'%23f0f0f0\' fill-opacity=\'1\' fill-rule=\'evenodd\'/%3E%3C/svg%3E")]' : ''
+                  } ${
                     removingBgIndex === idx ? "opacity-50" : ""
                   }`}
                 />

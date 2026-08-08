@@ -12,6 +12,7 @@ export default function Home() {
   const [images, setImages] = useState<string[]>([]);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isListing, setIsListing] = useState(false);
+  const [canvasBg, setCanvasBg] = useState("transparent");
   const [publishedListing, setPublishedListing] = useState<{ url: string, message: string } | null>(null);
   const [isRefreshingDesc, setIsRefreshingDesc] = useState(false);
   const [descMode, setDescMode] = useState<"PREVIEW" | "EDIT">("PREVIEW");
@@ -131,7 +132,9 @@ export default function Home() {
       const src = images[index];
       
       const blob = await fetch(src).then(r => r.blob());
-      const resultBlob = await removeBackground(blob);
+      const resultBlob = await removeBackground(blob, {
+        model: "isnet"
+      });
       
       const reader = new FileReader();
       const base64Url = await new Promise<string>((resolve, reject) => {
@@ -568,6 +571,8 @@ export default function Home() {
               triggerIdentify={triggerIdentify}
               identification={identification}
               error={error}
+              canvasBg={canvasBg}
+              setCanvasBg={setCanvasBg}
             />
 
             {error && (
