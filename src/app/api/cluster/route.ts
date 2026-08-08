@@ -44,25 +44,21 @@ Rules:
 /** Convert any supported image string to a Gemini inlineData part.
  *  Strips data-URI prefixes before passing raw base64 to the API. */
 function imageToInlinePart(imgStr: string): object {
-  // HTTPS/HTTP URL — fetch and re-encode as base64
   if (imgStr.startsWith("http://") || imgStr.startsWith("https://")) {
-    // Caller must await — handled below with Promise.all
     throw new Error("URL images must be handled via imageUrlToInlinePart");
   }
 
-  // Data URI: "data:image/jpeg;base64,<base64>"
+  let mimeType = "image/jpeg";
   if (imgStr.startsWith("data:")) {
     const commaIdx = imgStr.indexOf(",");
-    const header   = imgStr.slice(0, commaIdx);          // "data:image/jpeg;base64"
-    const mimeType = header.split(":")[1]?.split(";")[0] ?? "image/jpeg";
-    // Strip the "data:...,base64," prefix — Gemini wants raw base64 only
-    const cleanBase64 = imgStr.slice(commaIdx + 1);
-    return { inlineData: { data: cleanBase64, mimeType } };
+    if (commaIdx !== -1) {
+      const header = imgStr.slice(0, commaIdx);
+      mimeType = header.split(":")[1]?.split(";")[0] ?? "image/jpeg";
+    }
   }
 
-  // Plain base64 (no prefix)
   const cleanBase64 = imgStr.replace(/^data:image\/\w+;base64,/, "");
-  return { inlineData: { data: cleanBase64, mimeType: "image/jpeg" } };
+  return { inlineData: { data: cleanBase64, mimeType } };
 }
 
 async function imageUrlToInlinePart(imgStr: string): Promise<object> {
@@ -112,9 +108,9 @@ export async function POST(req: NextRequest) {
       ...imageParts,
     ];
 
-    // Single model — no retry loop, no fallback chain
+    // Single model — strictly use gemini-1.5-flash with no retry/fallback chain
     const res = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
+      model: "gemini-1.5-flash",
       contents: parts,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -131,10 +127,26 @@ export async function POST(req: NextRequest) {
     }
 
     const { clusters } = JSON.parse(res.text);
-    return NextResponse.json({ clusters });
+
+    // Process clusters to guarantee internal sorting (preserving natural upload sequence/front cover)
+    // and sort the clusters list chronologically based on their first appearance.
+    const processedClusters = clusters
+      .map((c: any) => ({
+        ...c,
+        photo_indices: Array.isArray(c.photo_indices)
+          ? [...c.photo_indices].sort((a: number, b: number) => a - b)
+          : [],
+      }))
+      .sort((a: any, b: any) => {
+        const aMin = a.photo_indices[0] ?? 0;
+        const bMin = b.photo_indices[0] ?? 0;
+        return aMin - bMin;
+      });
+
+    return NextResponse.json({ clusters: processedClusters });
 
   } catch (error) {
-    // Log the raw exception so Vercel surfaces the full detail
+    // Output directly to console.error so Vercel captures raw exception logs
     console.error("[cluster error]:", error);
     return NextResponse.json({ error: "Internal server error." }, { status: 500 });
   }

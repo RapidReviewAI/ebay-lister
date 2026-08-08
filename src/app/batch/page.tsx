@@ -45,7 +45,34 @@ export default function BatchPage() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Profile policy IDs — loaded on mount, mirrors Single Mode ───────────
+  // These are kept in state so handleExportCSV always has the real values
+  // even if the in-export Supabase fetch returns null/empty.
+  const [shippingProfileId, setShippingProfileId] = useState("");
+  const [returnProfileId, setReturnProfileId] = useState("");
+  const [paymentProfileId, setPaymentProfileId] = useState("");
+
   // ── Auto-save listings to Supabase (debounced 1 s) ──────────────────────
+  // Load business-policy IDs from Supabase on mount (same pattern as Single Mode)
+  useEffect(() => {
+    async function loadProfile() {
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("default_shipping_profile, default_return_policy, default_payment_policy")
+        .eq("user_id", user.id)
+        .single();
+      if (data) {
+        if (data.default_shipping_profile) setShippingProfileId(data.default_shipping_profile);
+        if (data.default_return_policy) setReturnProfileId(data.default_return_policy);
+        if (data.default_payment_policy) setPaymentProfileId(data.default_payment_policy);
+      }
+    }
+    loadProfile();
+  }, []);
+
   useEffect(() => {
     if (listings.length === 0) return;
 
@@ -165,6 +192,16 @@ export default function BatchPage() {
           "/api/generate-single",
           { photos: clusterPhotos }
         );
+
+        // Ensure the batch pipeline assigns the primary/first item photo as the headline cover photo
+        if (listing && Array.isArray(listing.photos) && clusterPhotos[0]) {
+          const firstPhoto = clusterPhotos[0];
+          listing.photos = [
+            firstPhoto,
+            ...listing.photos.filter((p: string) => p !== firstPhoto),
+          ];
+        }
+
         setListings((prev) => [...prev, listing]);
       } catch (err: any) {
         console.error(`generate-single failed for cluster ${i}:`, err);
@@ -216,25 +253,40 @@ export default function BatchPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+
+      // Baseline: use the policy IDs already loaded into state on mount.
+      // This guarantees non-empty values even if the in-export fetch below
+      // returns null (new account, RLS issue, empty row, etc.).
       let userProfile: Profile = {
         id: "",
         user_id: user?.id || "",
         ai_credits_used: 0,
         updated_at: "",
-        default_postal_code:
-          process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286",
-        default_shipping_profile: "158932641011",
-        default_return_policy: "158932641012",
+        default_postal_code: process.env.NEXT_PUBLIC_DEFAULT_POSTAL_CODE || "49286",
+        default_shipping_profile: shippingProfileId || "158932641011",
+        default_return_policy:    returnProfileId   || "158932641012",
         default_handling_time: "1",
-        default_payment_policy: "158932641013",
+        default_payment_policy:   paymentProfileId  || "158932641013",
       };
+
+      // Attempt a fresh fetch to pick up any profile edits made this session.
       if (user) {
         const { data } = await supabase
           .from("profiles")
           .select("*")
           .eq("user_id", user.id)
           .single();
-        if (data) userProfile = { ...userProfile, ...data };
+        // Spread only truthy policy fields so we never overwrite a good
+        // state value with an empty string from the DB.
+        if (data) {
+          userProfile = {
+            ...userProfile,
+            ...data,
+            default_shipping_profile: data.default_shipping_profile || userProfile.default_shipping_profile,
+            default_return_policy:    data.default_return_policy    || userProfile.default_return_policy,
+            default_payment_policy:   data.default_payment_policy   || userProfile.default_payment_policy,
+          };
+        }
       }
       csvContent = generateEbayCSV(items, userProfile);
     } else {
