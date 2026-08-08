@@ -3,7 +3,7 @@ import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const schema: Schema = {
   type: Type.ARRAY,
