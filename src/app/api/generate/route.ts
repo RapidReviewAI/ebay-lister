@@ -97,6 +97,20 @@ export async function POST(req: NextRequest) {
 
     const listing = JSON.parse(responseText.replace(/```json|```/g, "").trim());
 
+    // Helper to find specific values in the array Gemini returns
+    const findSpec = (name: string) => 
+      listing.item_specifics?.find((s: any) => s.name.toLowerCase() === name.toLowerCase())?.value;
+
+    // Flatten the critical fields for the UI/CSV
+    const refinedListing = {
+      ...listing,
+      brand: listing.brand || findSpec("Brand") || "Unbranded",
+      size: listing.size || findSpec("Size") || "N/A",
+      color: listing.color || findSpec("Color") || "Multi-Color",
+      category: listing.category || "Collectibles > Non-Sport Trading Cards",
+      categoryId: listing.categoryId || "183050", // Default to Trading Cards if it fails
+    };
+
     // Generate a valid UUID so PostgreSQL (22P02) doesn't crash
     const validId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4();
 
@@ -107,11 +121,11 @@ export async function POST(req: NextRequest) {
     ];
 
     return NextResponse.json({
-      ...listing,
+      ...refinedListing,
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 17
+      v: 18
     });
 
   } catch (error: any) {
