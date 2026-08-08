@@ -59,5 +59,18 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(url)
   }
 
+  if (user && !url.pathname.startsWith('/onboarding') && !url.pathname.startsWith('/api')) {
+    const { data } = await supabase
+      .from('profiles')
+      .select('username')
+      .eq('user_id', user.id)
+      .single()
+
+    if (!data || !data.username) {
+      url.pathname = '/onboarding'
+      return NextResponse.redirect(url)
+    }
+  }
+
   return supabaseResponse
 }

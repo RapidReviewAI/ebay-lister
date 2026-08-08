@@ -13,6 +13,7 @@ import { sanitizeEbayText } from "@/lib/sanitize";
 import { createClient } from "@/lib/supabase/client";
 import { generateEbayCSV } from "@/lib/exporters/ebay";
 import { SettingsModal } from "@/components/SettingsModal";
+import { Navbar } from "@/components/Navbar";
 import { Profile, MasterItem } from "@/types/inventory";
 
 export default function Home() {
@@ -499,42 +500,15 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8">
-      <div className="max-w-[1400px] mx-auto">
-        <header className="mb-8 pb-6 border-b border-slate-200 flex flex-col md:flex-row items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-600 p-2 rounded-xl shadow-lg shadow-indigo-200">
-              <Package className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="font-extrabold text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-              Lister<span className="text-slate-900">AI</span>
-            </h1>
-          </div>
-          
-          <nav className="flex items-center gap-2">
-            <div className="px-4 py-2 text-sm font-semibold text-indigo-700 bg-indigo-50 rounded-lg flex items-center gap-2">
-              <Check className="w-4 h-4" />
-              Single Mode
-            </div>
-            <Link href="/batch" className="px-4 py-2 text-sm font-semibold text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-2">
-              <Package className="w-4 h-4" />
-              Bulk Mode
-            </Link>
-            <button
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 text-slate-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer"
-              title="Settings"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
-          </nav>
-          {identification && !publishedListing && (
-             <div className="hidden md:flex items-center gap-2 mt-4 md:mt-0 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full border border-emerald-200 shadow-sm">
-               <Check className="w-4 h-4" />
-               <span className="text-sm font-semibold">Ready to List</span>
-             </div>
-          )}
-        </header>
+    <main className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+      <Navbar mode="single" onSettingsClick={() => setIsSettingsOpen(true)} />
+      <div className="max-w-[1400px] mx-auto p-4 md:p-8">
+        {identification && !publishedListing && (
+           <div className="mb-6 flex items-center gap-2 bg-emerald-50 text-emerald-700 px-4 py-2 rounded-full border border-emerald-200 shadow-sm max-w-max">
+             <Check className="w-4 h-4" />
+             <span className="text-sm font-semibold">Ready to List</span>
+           </div>
+        )}
 
         {publishedListing && (
           <div className="mb-8 p-6 bg-emerald-50 border border-emerald-200 rounded-2xl shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4">
