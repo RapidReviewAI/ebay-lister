@@ -33,6 +33,7 @@ const listingSchema: Schema = {
         required: ["name", "value"],
       },
     },
+    cover_photo_index: { type: Type.NUMBER },
   },
   required: [
     "id",
@@ -42,6 +43,7 @@ const listingSchema: Schema = {
     "category",
     "categoryId",
     "condition",
+    "cover_photo_index",
   ],
 };
 
@@ -58,6 +60,9 @@ RULES:
 6. Prohibited: Never output 'cbd', 'hemp', 'replica', 'fake', 'weapon', 'ammo'.
 7. If a field is unknown use "Unbranded", "N/A", or "" as appropriate.
 8. Generate a short unique 'id' (e.g. "item_abc123").
+9. cover_photo_index: Set this to the 0-based index of the single best hero photo
+   (clearest full-item shot, good lighting, plain or neutral background). This
+   photo will be placed first in the eBay listing as the main thumbnail.
 `.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
@@ -101,7 +106,7 @@ export async function POST(req: NextRequest) {
       ...imageParts,
     ];
 
-    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"];
+    const MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"];
     let responseText: string | null = null;
 
     for (const model of MODELS) {
@@ -138,8 +143,25 @@ export async function POST(req: NextRequest) {
     }
 
     const listing = JSON.parse(responseText);
-    // Attach the original photo URLs so the client can display thumbnails
-    listing.photos = photos;
+
+    // ── Cover photo promotion ─────────────────────────────────────────────
+    // Mirror Single Mode's hero-first sort: move the AI-chosen cover photo
+    // to photos[0] so eBay always uses it as the main listing thumbnail.
+    const coverIdx: number =
+      typeof listing.cover_photo_index === "number" &&
+      listing.cover_photo_index >= 0 &&
+      listing.cover_photo_index < photos.length
+        ? listing.cover_photo_index
+        : 0;
+
+    const orderedPhotos = [
+      photos[coverIdx],
+      ...photos.filter((_: string, i: number) => i !== coverIdx),
+    ];
+
+    listing.photos = orderedPhotos;
+    // Strip internal field — client doesn't need it
+    delete listing.cover_photo_index;
 
     return NextResponse.json(listing);
   } catch (err: any) {
