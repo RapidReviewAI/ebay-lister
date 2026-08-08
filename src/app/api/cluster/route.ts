@@ -1,22 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(
-  process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || ""
-);
 
 export async function POST(req: NextRequest) {
   try {
     const { images } = await req.json();
+    const API_KEY = process.env.GOOGLE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
 
     if (!images || !Array.isArray(images) || images.length === 0) {
       return NextResponse.json({ error: "No images provided." }, { status: 400 });
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    if (!API_KEY) {
+      return NextResponse.json({ error: "API Key missing." }, { status: 500 });
+    }
 
-    // 1. Process images and FORCE CLEAN the objects
-    const imageParts = await Promise.all(
+    // 1. Prepare the raw parts for the REST API
+    const parts = await Promise.all(
       images.map(async (url: string) => {
         try {
           let base64Data = url;
@@ -25,8 +23,8 @@ export async function POST(req: NextRequest) {
           if (url.startsWith("http://") || url.startsWith("https://")) {
             const response = await fetch(url);
             if (!response.ok) return null;
-            const arrayBuffer = await response.arrayBuffer();
-            base64Data = Buffer.from(arrayBuffer).toString('base64');
+            const buffer = await response.arrayBuffer();
+            base64Data = Buffer.from(buffer).toString('base64');
             const contentType = response.headers.get("content-type");
             if (contentType) mimeType = contentType;
           } else if (url.startsWith("data:")) {
@@ -37,57 +35,54 @@ export async function POST(req: NextRequest) {
             }
           }
 
-          // We create a clean, literal object and stringify/parse it 
-          // to ensure NO hidden properties like 'source' exist.
-          const part = {
-            inlineData: {
-              data: base64Data,
-              mimeType: mimeType
+          return {
+            inline_data: {
+              mime_type: mimeType,
+              data: base64Data
             }
           };
-          
-          return JSON.parse(JSON.stringify(part));
         } catch (e) {
           return null;
         }
       })
     ).then(res => res.filter(p => p !== null));
 
-    if (imageParts.length === 0) {
-      return NextResponse.json({ error: "Image processing failed." }, { status: 422 });
-    }
+    // 2. Add the instruction text part
+    parts.push({
+      text: "Task: Group these images by unique product. Output ONLY a valid JSON array of objects. Schema: [{\"itemTitle\": \"string\", \"imageUrls\": [\"string\"]}]"
+    } as any);
 
-    // 2. Clean the Prompt Part
-    const promptPart = JSON.parse(JSON.stringify({
-      text: `Task: Group these images by unique product.
-             Output: A JSON array of objects.
-             Schema: {"itemTitle": string, "imageUrls": string[]}
-             Context: Resell Radar eBay listing logic.`
-    }));
-
-    // 3. Execute with forced POJO array
-    const result = await model.generateContent({
-      contents: [{ 
-        role: 'user', 
-        parts: [...imageParts, promptPart] 
-      }],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
+    // 3. Hit the REST endpoint directly
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    
+    const geminiResponse = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts }],
+        generationConfig: {
+          responseMimeType: "application/json",
+        }
+      })
     });
 
-    const response = await result.response;
-    const text = response.text();
-    
-    // Final check for Markdown JSON blocks
-    const cleanJson = JSON.parse(text.replace(/```json|```/g, ""));
+    const result = await geminiResponse.json();
+
+    if (!geminiResponse.ok) {
+      console.error("🚨 GOOGLE REST ERROR:", JSON.stringify(result, null, 2));
+      throw new Error(result.error?.message || "Google API Refusal");
+    }
+
+    // 4. Extract and parse the text from the REST response structure
+    const textResponse = result.candidates[0].content.parts[0].text;
+    const cleanJson = JSON.parse(textResponse.replace(/```json|```/g, ""));
 
     return NextResponse.json(cleanJson);
 
   } catch (error: any) {
-    console.error("🚨 GEMINI CRITICAL FAILURE:", error);
+    console.error("🚨 CLUSTER SYSTEM FAILURE:", error);
     return NextResponse.json({ 
-      error: "SDK Serialization Error", 
+      error: "Bypass Route Failed", 
       details: error.message 
     }, { status: 500 });
   }
