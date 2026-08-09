@@ -31,18 +31,21 @@ export default function ListingReview({
 
   // Helper to normalize item_specifics as key-value pairs
   const getSpecificsEntries = (): [string, string][] => {
-    if (!item.item_specifics) return [];
+    // Check primary location, then check the 'specifics' nest as a fallback
+    const source = item.item_specifics || item.specifics?.item_specifics || item.specifics;
+
+    if (!source) return [];
 
     // If it's already an array of [key, value] or [{name, value}]
-    if (Array.isArray(item.item_specifics)) {
-      return item.item_specifics.map((s: any) =>
+    if (Array.isArray(source)) {
+      return source.map((s: any) =>
         Array.isArray(s) ? [String(s[0]), String(s[1])] : [s.name || s.key || "Property", String(s.value ?? "")]
       );
     }
 
     // If it's a standard object { Brand: 'Topps' }
-    if (typeof item.item_specifics === "object") {
-      return Object.entries(item.item_specifics).map(([k, v]) => [k, String(v ?? "")]);
+    if (typeof source === "object") {
+      return Object.entries(source).map(([k, v]) => [k, String(v ?? "")]);
     }
 
     return [];
@@ -226,7 +229,7 @@ export default function ListingReview({
             </label>
             <input
               className="w-full p-2.5 border border-slate-200 rounded-lg font-mono text-emerald-700 font-bold bg-slate-50 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
-              value={item.categoryId || ""}
+              value={item.categoryId || item.specifics?.categoryId || ""}
               placeholder="e.g. 51959"
               onChange={(e) => onUpdate({ ...item, categoryId: e.target.value })}
             />

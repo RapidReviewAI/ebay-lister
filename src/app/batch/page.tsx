@@ -121,14 +121,22 @@ export default function BatchPage() {
 
         try {
           // CALLING THE UPDATED ROUTE (/api/generate with /api/generate-single fallback)
-          let listing: any = null;
+          let rawData: any = null;
           try {
             const res = await axios.post("/api/generate", { photos: clusterPhotos });
-            listing = res.data;
+            rawData = res.data;
           } catch {
             const res = await axios.post("/api/generate-single", { photos: clusterPhotos });
-            listing = res.data;
+            rawData = res.data;
           }
+
+          // FRANK'S NESTING KILLER:
+          const listing = {
+            ...rawData,
+            ...(rawData.specifics ? rawData.specifics : {}),
+            id: rawData.id || rawData.specifics?.id,
+            photos: rawData.photos || rawData.specifics?.photos
+          };
           
           if (user && listing?.id) {
             // Save to Supabase immediately for each item to avoid one big failure at the end
@@ -148,8 +156,17 @@ export default function BatchPage() {
               .select()
               .single();
             
-            if (!saveError && savedData) finalResults.push(savedData);
-            else finalResults.push(listing);
+            if (!saveError && savedData) {
+              const flatSaved = {
+                ...savedData,
+                ...(savedData.specifics ? savedData.specifics : {}),
+                id: savedData.id,
+                photos: savedData.photos || listing.photos
+              };
+              finalResults.push(flatSaved);
+            } else {
+              finalResults.push(listing);
+            }
           } else {
             finalResults.push(listing);
           }

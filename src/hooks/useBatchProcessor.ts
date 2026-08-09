@@ -18,7 +18,18 @@ export function useBatchProcessor() {
         });
         
         const data = await response.json();
-        results.push(data);
+
+        // FRANK'S NESTING KILLER:
+        // If the API returned everything inside a 'specifics' key, spread it out.
+        const flattenedItem = {
+          ...data,
+          ...(data.specifics ? data.specifics : {}),
+          // Ensure we don't lose the original ID or photos
+          id: data.id || data.specifics?.id,
+          photos: data.photos || data.specifics?.photos
+        };
+
+        results.push(flattenedItem);
         
         // Update progress bar
         setProgress(Math.round(((i + 1) / items.length) * 100));
