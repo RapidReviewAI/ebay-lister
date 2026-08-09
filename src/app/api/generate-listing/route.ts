@@ -43,8 +43,17 @@ export async function POST(req: NextRequest) {
     const validParts = imageParts.filter(Boolean);
     if (!validParts.length) throw new Error("Failed to process any images.");
 
-    // CALLING STABLE V1 DIRECTLY - NO SDK
-    const genAIUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    // FRANK'S SHOTGUN LIST: Try the most stable beta strings
+    const MODELS_TO_TRY = [
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-latest",
+      "gemini-1.5-flash-8b", // Ultra-light version, usually always available
+      "gemini-pro-vision"    // Legacy fallback
+    ];
+
+    let lastError = "";
+    let finalResult: any = null;
+    let successfulModel = "";
 
     const payload = {
       contents: [{
@@ -56,21 +65,35 @@ export async function POST(req: NextRequest) {
       generationConfig: { responseMimeType: "application/json" }
     };
 
-    const googleRes = await fetch(genAIUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
+    for (const modelName of MODELS_TO_TRY) {
+      try {
+        console.log(`Frank Status - Attempting REST call for: ${modelName}`);
+        const genAIUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${API_KEY}`;
+        const googleRes = await fetch(genAIUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
 
-    if (!googleRes.ok) {
-      const errorData = await googleRes.json();
-      throw new Error(`Google API Error: ${errorData.error?.message || googleRes.statusText}`);
+        if (googleRes.ok) {
+          finalResult = await googleRes.json();
+          successfulModel = modelName;
+          break;
+        } else {
+          const errData = await googleRes.json();
+          lastError = errData.error?.message || googleRes.statusText;
+        }
+      } catch (e: any) {
+        lastError = e.message;
+        continue;
+      }
     }
 
-    const result = await googleRes.json();
-    const text = result.candidates[0].content.parts[0].text;
+    if (!finalResult) throw new Error(`All models in fallback list failed. Last error: ${lastError}`);
+
+    const text = finalResult.candidates[0].content.parts[0].text;
     const cleanText = text.replace(/```json|```/g, "").trim();
-    
+
     let listing: any;
     try {
       listing = JSON.parse(cleanText);
@@ -92,14 +115,15 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 36
+      model_used: successfulModel,
+      v: 37
     });
 
   } catch (error: any) {
     console.error("FRANK REST CRASH:", error.message);
     return NextResponse.json({ 
       error: error.message, 
-      frank_hint: "Stable V1 Endpoint Attempted" 
+      frank_hint: "Check model availability in your region" 
     }, { status: 500 });
   }
 }
