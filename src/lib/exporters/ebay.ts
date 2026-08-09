@@ -50,7 +50,13 @@ export function generateEbayCSV(items: MasterItem[], userProfile: Profile): stri
     const validImages = (item.photos || []).filter((img) => typeof img === 'string' && img.trim().length > 0);
     const validPublicUrls = validImages
       .filter(url => url.startsWith("http://") || url.startsWith("https://"))
-      .map(url => url.replace(/[,;]/g, '|'));
+      .map(url => {
+        let clean = url.replace(/[,;]/g, '|');
+        if (clean.includes("cloudinary.com") && !clean.includes("a_auto")) {
+          return clean.replace("/upload/", "/upload/a_auto,q_auto,f_auto/");
+        }
+        return clean;
+      });
 
     const categoryId = String(item.categoryId || '260010').replace(/[^0-9]/g, '');
 

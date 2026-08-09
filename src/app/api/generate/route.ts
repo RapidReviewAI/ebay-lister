@@ -30,17 +30,23 @@ JSON Format:
 }`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
-  let b64Data = imgStr;
+  let finalUrl = imgStr;
+
+  if (imgStr.includes("cloudinary.com") && !imgStr.includes("a_auto")) {
+    finalUrl = imgStr.replace("/upload/", "/upload/a_auto/");
+  }
+
+  let b64Data = finalUrl;
   let mimeType = "image/jpeg";
 
-  if (imgStr.startsWith("http://") || imgStr.startsWith("https://")) {
-    const res = await fetch(imgStr);
+  if (finalUrl.startsWith("http://") || finalUrl.startsWith("https://")) {
+    const res = await fetch(finalUrl);
     const buf = await res.arrayBuffer();
     b64Data = Buffer.from(buf).toString("base64");
     mimeType = res.headers.get("content-type") ?? "image/jpeg";
-  } else if (imgStr.includes(";base64,")) {
-    const split = imgStr.split(";base64,");
-    b64Data = split[1] || imgStr;
+  } else if (finalUrl.includes(";base64,")) {
+    const split = finalUrl.split(";base64,");
+    b64Data = split[1] || finalUrl;
     mimeType = split[0].split(":")[1] || "image/jpeg";
   }
 
@@ -123,7 +129,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 19
+      v: 20
     });
 
   } catch (error: any) {
