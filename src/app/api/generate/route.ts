@@ -8,14 +8,17 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are an eBay Listing Specialist. 
-Analyze the images and provide a high-accuracy listing.
-- TITLE: 80 chars, keyword-dense.
-- CATEGORY: Exact eBay breadcrumb (e.g., Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops).
-- CATEGORY_ID: The specific eBay Numeric ID for this category.
-- ITEM_SPECIFICS: Brand, Size, Color, Material, etc.
-- IS_LOT: Boolean, true if multiple items.
-OUTPUT ONLY VALID JSON.`.trim();
+const SYSTEM_INSTRUCTION = `You are an inventory clerk. Return ONLY a JSON object for an eBay listing based on these images.
+REQUIRED KEYS:
+"title": 80 char SEO title.
+"category": Full eBay path.
+"categoryId": eBay numeric ID.
+"description": Plain text details.
+"price": Suggested retail price.
+"item_specifics": { "Brand": "...", "Size": "...", "Color": "..." }
+"is_lot": true/false.
+
+If you cannot identify the item, guess based on visual cues. NEVER return empty values.`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -87,33 +90,21 @@ export async function POST(req: NextRequest) {
 
     if (!rawText) throw new Error("All models failed to generate content.");
 
-    // Clean JSON markdown backticks before parsing
-    const cleanJson = rawText.replace(/```json|```/g, "").trim();
-    const listing = JSON.parse(cleanJson);
-
-    // Determine the best category name and ID from the model response
-    let catName = "Uncategorized > Please Edit";
-    if (typeof listing.category_suggestion === 'string') {
-      catName = listing.category_suggestion;
-    } else if (typeof listing.category_suggestion === 'object' && listing.category_suggestion !== null) {
-      catName = listing.category_suggestion.breadcrumb || listing.category_suggestion.name || catName;
-    } else if (typeof listing.category === 'string') {
-      catName = listing.category;
-    } else if (typeof listing.category === 'object' && listing.category !== null) {
-      catName = listing.category.breadcrumb || listing.category.name || catName;
+    // FRANK'S BULLETPROOF PARSER
+    let listing: any;
+    try {
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      const cleanJson = jsonMatch ? jsonMatch[0] : rawText;
+      listing = JSON.parse(cleanJson);
+    } catch (e) {
+      console.error("Failed to parse Gemini response:", rawText);
+      listing = {
+        title: "Manual Review Required: " + (rawText.substring(0, 30) || "Empty Response"),
+        category: "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops",
+        categoryId: "51959",
+        item_specifics: { Brand: "Unknown", Size: "3T", Color: "Multi" }
+      };
     }
-
-    let catId = listing.categoryId || listing.category_id || (typeof listing.category_suggestion === 'object' ? listing.category_suggestion?.id : "") || "";
-
-    // Frank's "No Hallucination" logic: 
-    // If the category contains "Trading Card" but the title contains "Shirt" or "Clothes" or "Polo", 
-    // we flag it for manual review / correct clothing category instead of defaulting to junk.
-    const titleLower = (listing.title || "").toLowerCase();
-    const finalCategory = (catName.includes("Trading Card") && (titleLower.includes("shirt") || titleLower.includes("polo") || titleLower.includes("top"))) 
-      ? "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops" 
-      : catName;
-
-    const finalCategoryId = (finalCategory.includes("Toddler Clothing")) ? "51959" : String(catId);
 
     // Helper to find specific values if item_specifics is an array or object
     const findSpec = (name: string) => {
@@ -138,7 +129,13 @@ export async function POST(req: NextRequest) {
 
     const priceVal = listing.suggested_price || listing.price || "19.99";
 
-    // Flatten critical fields
+    // Ensure critical fields aren't null
+    const finalTitle = listing.title || "Toddler Clothing Lot";
+    const rawCategory = listing.category || listing.category_suggestion || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops";
+    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : String(rawCategory);
+    const rawCatId = listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "51959");
+    const finalCategoryId = String(rawCatId || "51959");
+
     const refinedListing = {
       ...listing,
       price: String(priceVal),
@@ -164,14 +161,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ...refinedListing,
       id: validId,
-      photos: orderedPhotos,
-      title: listing.title || "Untitled Listing",
+      title: finalTitle,
       category: finalCategory,
       categoryId: finalCategoryId,
-      is_lot: listing.is_lot ?? false,
-      rotation: rot,
-      model_debug: modelUsed,
-      v: 28
+      photos: orderedPhotos,
+      model_debug: modelUsed + " | " + rawText.substring(0, 100),
+      v: 29
     });
 
   } catch (error: any) {
