@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
 
-export const maxDuration = 60; // Attempt to tell Vercel to wait (only works on Pro, but good practice)
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,10 +13,13 @@ export async function POST(req: NextRequest) {
     if (!photos?.length) return NextResponse.json({ error: "No photos" }, { status: 400 });
 
     const genAI = new GoogleGenerativeAI(API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // FRANK'S PERFORMANCE HACK: Downscale images via Cloudinary URLs to ~200kb each
-    // This bypasses the 4.5MB limit and speeds up the Gemini upload.
+    // FRANK'S MODEL FALLBACK LIST: 
+    // Google changes these aliases frequently. We try the most likely winners.
+    const MODELS_TO_TRY = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-001"];
+    let lastError = "";
+
+    // Optimized images for platform limits
     const optimizedPhotos = photos.slice(0, 2).map((url: string) => {
       if (url.includes("cloudinary.com")) {
         if (url.includes("/upload/a_auto/")) {
@@ -33,12 +36,7 @@ export async function POST(req: NextRequest) {
           const res = await fetch(url);
           if (!res.ok) return null;
           const buffer = await res.arrayBuffer();
-          return {
-            inlineData: {
-              data: Buffer.from(buffer).toString("base64"),
-              mimeType: res.headers.get("content-type") || "image/jpeg",
-            },
-          };
+          return { inlineData: { data: Buffer.from(buffer).toString("base64"), mimeType: res.headers.get("content-type") || "image/jpeg" } };
         } catch {
           return null;
         }
@@ -48,10 +46,27 @@ export async function POST(req: NextRequest) {
     const validParts = imageParts.filter(Boolean);
     if (!validParts.length) throw new Error("Failed to process any images.");
 
-    const prompt = "Return eBay JSON: title, price, category, categoryId, item_specifics, description. Category for sports cards is 261328.";
-    
-    // We don't use 'generationConfig' here to keep the request as light as possible
-    const result = await model.generateContent([prompt, ...validParts as any]);
+    const prompt = "Return eBay JSON: title, price, category, categoryId, item_specifics. Category for cards is 261328.";
+
+    // ATTEMPT GENERATION WITH FALLBACKS
+    let result;
+    let successfulModel = "";
+    for (const modelName of MODELS_TO_TRY) {
+      try {
+        const currentModel = genAI.getGenerativeModel({ model: modelName });
+        result = await currentModel.generateContent([prompt, ...validParts as any]);
+        if (result) {
+          successfulModel = modelName;
+          break; // We found a working model!
+        }
+      } catch (e: any) {
+        lastError = e.message;
+        continue; // Try the next model in the list
+      }
+    }
+
+    if (!result) throw new Error(`All models failed. Last error: ${lastError}`);
+
     const response = await result.response;
     const text = response.text().replace(/```json|```/g, "").trim();
     
@@ -76,11 +91,14 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 34
+      model_used: successfulModel,
+      v: 35
     });
 
   } catch (error: any) {
-    console.error("API CRASH:", error.message);
-    return NextResponse.json({ error: error.message, frank_hint: "Check Vercel Timeout" }, { status: 500 });
+    return NextResponse.json({ 
+      error: error.message, 
+      frank_hint: "Check model availability in your region" 
+    }, { status: 500 });
   }
 }
