@@ -221,8 +221,9 @@ export default function ListingReview({
               <span>Category ID</span>
             </label>
             <input
-              className="w-full p-2.5 border border-slate-200 rounded-lg font-mono text-slate-800 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden bg-slate-50/50"
+              className="w-full p-2.5 border border-slate-200 rounded-lg font-mono text-emerald-700 font-bold bg-slate-50 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden"
               value={item.categoryId || ""}
+              placeholder="e.g. 51959"
               onChange={(e) => onUpdate({ ...item, categoryId: e.target.value })}
             />
           </div>
@@ -254,6 +255,12 @@ export default function ListingReview({
             </h3>
             <span className="text-[10px] text-slate-400 font-medium">Editable Cassini Aspects</span>
           </div>
+
+          {specificsList.length === 0 && (
+            <div className="text-[10px] text-amber-600 bg-amber-50 p-2 rounded border border-amber-100 font-medium">
+              ⚠️ No specifics detected. Cassini visibility will be LOW.
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             {specificsList.map(([keyName, valStr], idx) => (

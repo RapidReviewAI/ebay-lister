@@ -106,30 +106,25 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // FORCE CATEGORY ID MAPPING (Common Reseller Categories)
-    const categoryMap: Record<string, string> = {
-      "toddler": "51959",
-      "shirt": "51959",
-      "trading card": "183050",
-      "collectible": "1",
-      "toy": "220"
-    };
+    // 1. ABSOLUTE CATEGORY ID MAPPING
+    let finalCategoryId = "1"; // Default to 'Collectibles'
+    const rawCategory = listing.category || listing.category_suggestion || "";
+    const catText = (typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "") : String(rawCategory)).toLowerCase();
+    const titleText = (listing.title || "").toLowerCase();
 
-    const rawCategory = listing.category || listing.category_suggestion || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops";
-    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : String(rawCategory);
-
-    let finalCategoryId = String(listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "") || "");
-    if (!finalCategoryId || finalCategoryId === "undefined") {
-      const catLower = finalCategory.toLowerCase();
-      Object.keys(categoryMap).forEach(key => {
-        if (catLower.includes(key)) finalCategoryId = categoryMap[key];
-      });
-      if (!finalCategoryId) finalCategoryId = "51959";
+    if (catText.includes("toddler") || titleText.includes("shirt") || titleText.includes("polo")) {
+      finalCategoryId = "51959"; // Baby & Toddler Tops
+    } else if (catText.includes("card") || titleText.includes("trading card") || titleText.includes("rookie")) {
+      finalCategoryId = "183050"; // Non-Sport Cards
+    } else if (catText.includes("toy") || catText.includes("action figure")) {
+      finalCategoryId = "246"; // Action Figures
+    } else if (listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "")) {
+      finalCategoryId = String(listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "1"));
     }
 
-    // ENSURE SPECIFICS ARE FLAT
+    // 2. GUARANTEE SPECIFICS STRUCTURE
     const rawSpecs = listing.item_specifics || listing.specifics || {};
-    const cleanSpecs = Array.isArray(rawSpecs)
+    const finalSpecs = Array.isArray(rawSpecs)
       ? rawSpecs.reduce((acc: any, spec: any) => {
           if (spec?.name) acc[spec.name] = String(spec.value ?? "");
           return acc;
@@ -139,8 +134,15 @@ export async function POST(req: NextRequest) {
           return acc;
         }, {});
 
-    // Helper to find specific values
-    const findSpec = (name: string) => cleanSpecs[name] || cleanSpecs[name.toLowerCase()];
+    // Force standard keys if missing for clothes
+    if (finalCategoryId === "51959") {
+      if (!finalSpecs.Brand) finalSpecs.Brand = listing.brand || "Unbranded";
+      if (!finalSpecs.Size) finalSpecs.Size = listing.size || "3T";
+      if (!finalSpecs.Color) finalSpecs.Color = listing.color || "Multicolor";
+      if (!finalSpecs.Department) finalSpecs.Department = listing.department || "Boys";
+    }
+
+    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : (String(rawCategory) || "General > Items");
 
     // Auto-apply rotation to Cloudinary image URLs if rotation is non-zero
     let finalPhotos = [...photos];
@@ -155,14 +157,14 @@ export async function POST(req: NextRequest) {
     }
 
     const priceVal = listing.suggested_price || listing.price || "19.99";
-    const finalTitle = listing.title || "Toddler Clothing Lot";
+    const finalTitle = listing.title || "Bulk Item Listing";
 
     const refinedListing = {
       ...listing,
       price: String(priceVal),
-      brand: listing.brand || findSpec("Brand") || "Unbranded",
-      size: listing.size || findSpec("Size") || "N/A",
-      color: listing.color || findSpec("Color") || "Multi-Color",
+      brand: finalSpecs.Brand || listing.brand || "Unbranded",
+      size: finalSpecs.Size || listing.size || "N/A",
+      color: finalSpecs.Color || listing.color || "Multi-Color",
       category: finalCategory,
       categoryId: finalCategoryId,
       condition: listing.condition || "3000",
@@ -185,10 +187,10 @@ export async function POST(req: NextRequest) {
       title: finalTitle,
       category: finalCategory,
       categoryId: finalCategoryId,
-      item_specifics: cleanSpecs, // Explicitly pass the flattened object
+      item_specifics: finalSpecs,
       photos: orderedPhotos,
       model_debug: modelUsed + " | " + rawText.substring(0, 100),
-      v: 29
+      v: 30
     });
 
   } catch (error: any) {
