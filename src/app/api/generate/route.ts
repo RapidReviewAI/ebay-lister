@@ -4,9 +4,13 @@ import { v4 as uuidv4 } from "uuid";
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// GET test: Visit /api/generate in your browser. If it says 'READY', the folder is correct.
+// BROWSER TEST: Visit /api/generate in your address bar.
 export async function GET() {
-  return NextResponse.json({ status: "READY_FOR_POST", v: 47 });
+  return NextResponse.json({ 
+    msg: "THE TOWER IS ALIVE", 
+    v: 48,
+    env_check: (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY) ? "KEY_FOUND" : "KEY_MISSING" 
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -71,9 +75,9 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 47
+      v: 48
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message, hint: "Frank V47 Hit" }, { status: 500 });
+    return NextResponse.json({ error: e.message, hint: "Frank V48 Hit" }, { status: 500 });
   }
 }
