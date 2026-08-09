@@ -8,61 +8,52 @@ export async function POST(req: NextRequest) {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
     
-    if (!API_KEY) return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
-    if (!photos?.length) return NextResponse.json({ error: "No photos" }, { status: 400 });
+    if (!API_KEY) return NextResponse.json({ error: "API_KEY_MISSING_IN_VERCEL" }, { status: 500 });
+    if (!photos?.length) return NextResponse.json({ error: "No photos provided" }, { status: 400 });
 
-    // IMAGE PROCESSING (Keep it light)
-    const optimizedPhotos = photos.slice(0, 2).map((url: string) => {
-      if (url.includes("cloudinary.com")) {
-        if (url.includes("/upload/a_auto/")) {
-          return url.replace("/upload/a_auto/", "/upload/c_limit,w_600,q_auto:low,a_auto/");
-        }
-        return url.replace("/upload/", "/upload/c_limit,w_600,q_auto:low/");
-      }
-      return url;
-    });
+    // FRANK'S LIGHTWEIGHT IMAGE PREP
+    const firstUrl = photos[0].includes("cloudinary.com")
+      ? photos[0].replace("/upload/", "/upload/c_limit,w_600,q_auto:low/")
+      : photos[0];
+    
+    const res = await fetch(firstUrl);
+    if (!res.ok) throw new Error(`Failed to fetch photo from URL: ${res.statusText}`);
+    const buffer = await res.arrayBuffer();
+    const base64Image = Buffer.from(buffer).toString("base64");
 
-    const imageParts = await Promise.all(
-      optimizedPhotos.map(async (url: string) => {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) return null;
-          const buffer = await res.arrayBuffer();
-          return { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: Buffer.from(buffer).toString("base64") } };
-        } catch {
-          return null;
-        }
-      })
-    );
+    // THE STABLE US URL (NO BETA, NO VERSIONED SUFFIX)
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
 
-    const validParts = imageParts.filter(Boolean);
-    if (!validParts.length) throw new Error("Failed to process any images.");
-
-    // THE 'V1' HAIL MARY
-    // Note: No 'v1beta', no fallback loop, just the absolute base model.
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    const payload = {
+      contents: [{
+        parts: [
+          { text: "Return eBay listing JSON with keys: title, price (number), category, categoryId, item_specifics (flat object), description. Category for sports cards is 261328." },
+          { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: base64Image } }
+        ]
+      }],
+      generationConfig: { responseMimeType: "application/json" }
+    };
 
     const googleRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: "Return eBay listing JSON: title, price, category, categoryId, item_specifics, description. Category for cards is 261328." }, ...validParts] }],
-        generationConfig: { responseMimeType: "application/json" }
-      })
+      body: JSON.stringify(payload)
     });
 
     const result = await googleRes.json();
-    
+
     if (!googleRes.ok) {
+      // THIS WILL CAPTURE THE EXACT REASON (e.g., API NOT ENABLED)
+      console.error("GOOGLE API REJECTION:", JSON.stringify(result));
       return NextResponse.json({ 
-        error: result.error?.message || "Google Rejected Request",
-        code: result.error?.code,
-        status: googleRes.status
+        error: "Google API Rejected", 
+        detail: result.error?.message || "Unknown error",
+        status: googleRes.status 
       }, { status: googleRes.status });
     }
 
-    const text = result.candidates[0].content.parts[0].text;
-    const cleanText = text.replace(/```json|```/g, "").trim();
+    const rawText = result.candidates[0].content.parts[0].text;
+    const cleanText = rawText.replace(/```json|```/g, "").trim();
 
     let listing: any;
     try {
@@ -76,7 +67,7 @@ export async function POST(req: NextRequest) {
     const catId = String(listing.categoryId || listing.category_id || "1");
     const finalCatId = (titleLower.includes("card") || titleLower.includes("topps") || titleLower.includes("panini")) ? "261328" : catId;
 
-    const validId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4();
+    const validId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : (listing.id || uuidv4());
 
     return NextResponse.json({
       ...listing,
@@ -85,7 +76,7 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 38
+      v: 40
     });
 
   } catch (error: any) {
