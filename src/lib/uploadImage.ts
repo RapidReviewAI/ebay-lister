@@ -4,7 +4,7 @@ const options = {
   maxSizeMB: 1,
   maxWidthOrHeight: 1920,
   useWebWorker: true,
-  exifOrientation: true
+  // Removed exifOrientation: true to satisfy the TypeScript compiler
 };
 
 export async function handleImageUploadUtility(

@@ -4,8 +4,7 @@ const options = {
   maxSizeMB: 1,
   maxWidthOrHeight: 1920,
   useWebWorker: true,
-  // This is the magic flag that fixes rotation based on EXIF
-  exifOrientation: true 
+  // Removed exifOrientation: true as it now defaults to auto and expects a number in this version
 };
 
 export async function handleImageUpload(file: File): Promise<string> {
