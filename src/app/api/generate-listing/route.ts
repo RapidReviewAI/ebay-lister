@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 
+export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
@@ -8,7 +9,8 @@ export async function POST(req: NextRequest) {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
     
-    if (!API_KEY) return NextResponse.json({ error: "API_KEY is missing in Vercel environment." }, { status: 500 });
+    // Minimal check to prove we reached the code
+    if (!API_KEY) return NextResponse.json({ error: "KEY_MISSING_IN_ENV" }, { status: 500 });
     if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided." }, { status: 400 });
 
     const firstUrl = photos[0].includes("cloudinary.com")
@@ -18,15 +20,14 @@ export async function POST(req: NextRequest) {
     const res = await fetch(firstUrl);
     if (!res.ok) throw new Error(`Failed to fetch photo from URL: ${res.statusText}`);
     const buffer = await res.arrayBuffer();
-    const b64 = Buffer.from(buffer).toString("base64");
+    const base64Image = Buffer.from(buffer).toString("base64");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
-
     const gRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: "Return eBay JSON: { 'title': 'string', 'price': 1.99, 'category': 'string', 'categoryId': 'string', 'item_specifics': {}, 'description': 'string' }" }, { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: b64 } }] }],
+        contents: [{ parts: [{ text: "Return eBay JSON: { 'title': 'string', 'price': 1.99, 'category': 'string', 'categoryId': 'string', 'item_specifics': {}, 'description': 'string' }" }, { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: base64Image } }] }],
         generationConfig: { responseMimeType: "application/json" }
       })
     });
@@ -66,10 +67,9 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 45
+      v: 46
     });
-
   } catch (e: any) {
-    return NextResponse.json({ error: e.message }, { status: 500 });
+    return NextResponse.json({ error: e.message, hint: "Frank V46 Route Hit" }, { status: 500 });
   }
 }
