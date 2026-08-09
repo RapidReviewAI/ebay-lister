@@ -185,7 +185,7 @@ export default function ListingReview({
           </div>
           <input
             className="w-full p-3 border border-slate-200 rounded-lg font-medium text-slate-900 text-sm focus:ring-2 focus:ring-slate-900 focus:outline-hidden bg-slate-50/50"
-            value={item.title || ""}
+            value={item.title || "Untitled Bulk Listing"}
             maxLength={80}
             onChange={(e) => onUpdate({ ...item, title: e.target.value })}
           />

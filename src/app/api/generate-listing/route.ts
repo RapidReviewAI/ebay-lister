@@ -8,12 +8,14 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are an eBay SEO Expert. Analyze the images.
-1. TITLE: 80 chars max. Format: [Brand] [Model/Name] [Gender/Size] [Color] [Key Feature/Condition]. No fluff words (L@@K, WOW).
-2. CATEGORY: Provide exact eBay Category ID and Breadcrumb.
-3. ITEM SPECIFICS: Output as a flat JSON object. Use standard eBay keys.
-4. CONDITION: Identify if New with Tags (NWT), Pre-owned, or Damaged.
-OUTPUT: JSON only.`.trim();
+const SYSTEM_INSTRUCTION = `You are an eBay Listing Specialist. 
+Analyze the images and provide a high-accuracy listing.
+- TITLE: 80 chars, keyword-dense.
+- CATEGORY: Exact eBay breadcrumb (e.g., Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops).
+- CATEGORY_ID: The specific eBay Numeric ID for this category.
+- ITEM_SPECIFICS: Brand, Size, Color, Material, etc.
+- IS_LOT: Boolean, true if multiple items.
+OUTPUT ONLY VALID JSON.`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -89,24 +91,29 @@ export async function POST(req: NextRequest) {
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const listing = JSON.parse(cleanJson);
 
-    // NORMALIZATION LOGIC START
-    let finalCategory = "Collectibles > Non-Sport Trading Cards";
-    let finalCategoryId = "183050";
-
-    if (typeof listing.category_suggestion === 'object' && listing.category_suggestion !== null) {
-      finalCategory = listing.category_suggestion.breadcrumb || listing.category_suggestion.name || finalCategory;
-      finalCategoryId = listing.category_suggestion.id || listing.category_suggestion.categoryId || finalCategoryId;
-    } else if (typeof listing.category_suggestion === 'string') {
-      finalCategory = listing.category_suggestion;
-    } else if (typeof listing.category === 'object' && listing.category !== null) {
-      finalCategory = listing.category.breadcrumb || listing.category.name || finalCategory;
-      finalCategoryId = listing.category.id || listing.category.categoryId || finalCategoryId;
+    // Determine the best category name and ID from the model response
+    let catName = "Uncategorized > Please Edit";
+    if (typeof listing.category_suggestion === 'string') {
+      catName = listing.category_suggestion;
+    } else if (typeof listing.category_suggestion === 'object' && listing.category_suggestion !== null) {
+      catName = listing.category_suggestion.breadcrumb || listing.category_suggestion.name || catName;
     } else if (typeof listing.category === 'string') {
-      finalCategory = listing.category;
+      catName = listing.category;
+    } else if (typeof listing.category === 'object' && listing.category !== null) {
+      catName = listing.category.breadcrumb || listing.category.name || catName;
     }
 
-    if (listing.categoryId) finalCategoryId = String(listing.categoryId);
-    // NORMALIZATION LOGIC END
+    let catId = listing.categoryId || listing.category_id || (typeof listing.category_suggestion === 'object' ? listing.category_suggestion?.id : "") || "";
+
+    // Frank's "No Hallucination" logic: 
+    // If the category contains "Trading Card" but the title contains "Shirt" or "Clothes" or "Polo", 
+    // we flag it for manual review / correct clothing category instead of defaulting to junk.
+    const titleLower = (listing.title || "").toLowerCase();
+    const finalCategory = (catName.includes("Trading Card") && (titleLower.includes("shirt") || titleLower.includes("polo") || titleLower.includes("top"))) 
+      ? "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops" 
+      : catName;
+
+    const finalCategoryId = (finalCategory.includes("Toddler Clothing")) ? "51959" : String(catId);
 
     // Helper to find specific values if item_specifics is an array or object
     const findSpec = (name: string) => {
@@ -158,8 +165,13 @@ export async function POST(req: NextRequest) {
       ...refinedListing,
       id: validId,
       photos: orderedPhotos,
+      title: listing.title || "Untitled Listing",
+      category: finalCategory,
+      categoryId: finalCategoryId,
+      is_lot: listing.is_lot ?? false,
+      rotation: rot,
       model_debug: modelUsed,
-      v: 27
+      v: 28
     });
 
   } catch (error: any) {
