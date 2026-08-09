@@ -89,6 +89,25 @@ export async function POST(req: NextRequest) {
     const cleanJson = rawText.replace(/```json|```/g, "").trim();
     const listing = JSON.parse(cleanJson);
 
+    // NORMALIZATION LOGIC START
+    let finalCategory = "Collectibles > Non-Sport Trading Cards";
+    let finalCategoryId = "183050";
+
+    if (typeof listing.category_suggestion === 'object' && listing.category_suggestion !== null) {
+      finalCategory = listing.category_suggestion.breadcrumb || listing.category_suggestion.name || finalCategory;
+      finalCategoryId = listing.category_suggestion.id || listing.category_suggestion.categoryId || finalCategoryId;
+    } else if (typeof listing.category_suggestion === 'string') {
+      finalCategory = listing.category_suggestion;
+    } else if (typeof listing.category === 'object' && listing.category !== null) {
+      finalCategory = listing.category.breadcrumb || listing.category.name || finalCategory;
+      finalCategoryId = listing.category.id || listing.category.categoryId || finalCategoryId;
+    } else if (typeof listing.category === 'string') {
+      finalCategory = listing.category;
+    }
+
+    if (listing.categoryId) finalCategoryId = String(listing.categoryId);
+    // NORMALIZATION LOGIC END
+
     // Helper to find specific values if item_specifics is an array or object
     const findSpec = (name: string) => {
       if (!listing.item_specifics) return undefined;
@@ -119,8 +138,8 @@ export async function POST(req: NextRequest) {
       brand: listing.brand || findSpec("Brand") || "Unbranded",
       size: listing.size || findSpec("Size") || "N/A",
       color: listing.color || findSpec("Color") || "Multi-Color",
-      category: listing.category || listing.category_suggestion || "Collectibles > Non-Sport Trading Cards",
-      categoryId: listing.categoryId || "183050",
+      category: finalCategory,
+      categoryId: finalCategoryId,
       condition: listing.condition || "3000",
       is_lot: listing.is_lot ?? false,
       rotation: rot,
@@ -140,7 +159,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 26
+      v: 27
     });
 
   } catch (error: any) {

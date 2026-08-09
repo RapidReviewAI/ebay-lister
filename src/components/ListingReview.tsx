@@ -228,7 +228,11 @@ export default function ListingReview({
           </label>
           <input
             className="w-full p-2 border border-slate-200 rounded-lg font-medium text-slate-700 text-xs bg-slate-50/50"
-            value={item.category || item.category_suggestion || "Collectibles > Non-Sport Trading Cards"}
+            value={
+              typeof item.category === "object"
+                ? item.category?.breadcrumb || item.category?.name || "Collectibles > Non-Sport Trading Cards"
+                : item.category || item.category_suggestion || "Collectibles > Non-Sport Trading Cards"
+            }
             onChange={(e) => onUpdate({ ...item, category: e.target.value })}
           />
         </div>
