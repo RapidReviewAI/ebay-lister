@@ -133,7 +133,13 @@ export async function POST(req: NextRequest) {
     const finalTitle = listing.title || "Toddler Clothing Lot";
     const rawCategory = listing.category || listing.category_suggestion || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops";
     const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : String(rawCategory);
-    const rawCatId = listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "51959");
+    let rawCatId = listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "");
+
+    if (finalCategory.toLowerCase().includes("toddler") || finalCategory.toLowerCase().includes("baby")) {
+      if (!rawCatId || rawCatId === "") {
+        rawCatId = "51959"; // Toddler Tops ID
+      }
+    }
     const finalCategoryId = String(rawCatId || "51959");
 
     const refinedListing = {

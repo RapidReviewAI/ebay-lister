@@ -89,14 +89,20 @@ export default function ListingReview({
     onUpdate({ ...item, photos: currentPhotos });
   };
 
-  // Cassini Strength Score Calculation (0 to 100)
+  // Cassini Strength Score Calculation (Strict Cassini Logic)
   const titleLen = (item.title || "").length;
-  const titleScore = Math.min(30, Math.round((titleLen / 80) * 30));
-  const priceScore = item.price && parseFloat(item.price) > 0 ? 20 : 0;
-  const descScore = (item.description || "").length > 30 ? 20 : 10;
-  const specsCount = specificsList.filter(([_, v]) => v && v !== "N/A").length;
-  const specsScore = Math.min(30, specsCount * 6);
-  const totalScore = Math.min(100, titleScore + priceScore + descScore + specsScore);
+  const titleScore = titleLen >= 75 ? 30 : Math.round((titleLen / 80) * 25);
+  const priceScore = item.price && parseFloat(item.price) > 0 ? 10 : 0;
+  const categoryScore = item.categoryId ? 10 : 0;
+  const descScore = (item.description || "").length > 50 ? 10 : 5;
+
+  // Cassini loves specifics. If you have Brand, Size, and Color, that's the baseline.
+  const requiredKeys = ["brand", "size", "color", "department", "type"];
+  const specsCount = specificsList.filter(([_, v]) => v && v !== "N/A" && v !== "").length;
+  const essentialSpecsCount = specificsList.filter(([k, v]) => requiredKeys.includes(k.toLowerCase()) && v && v !== "N/A" && v !== "").length;
+  const specsScore = (essentialSpecsCount * 8) + (Math.min(10, (specsCount - essentialSpecsCount) * 2));
+
+  const totalScore = Math.min(100, titleScore + priceScore + categoryScore + descScore + specsScore);
 
   let strengthLabel = "Good";
   let strengthColor = "bg-amber-500 text-amber-50";
@@ -241,8 +247,8 @@ export default function ListingReview({
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-600 flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-500" />
-              <span>Item Specifics ({specificsList.length})</span>
+              <CheckCircle2 className={`w-4 h-4 ${specsCount > 0 ? 'text-emerald-500' : 'text-amber-500'}`} />
+              <span>Item Specifics ({specsCount})</span>
             </h3>
             <span className="text-[10px] text-slate-400 font-medium">Editable Cassini Aspects</span>
           </div>
