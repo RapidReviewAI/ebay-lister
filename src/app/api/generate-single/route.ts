@@ -18,32 +18,27 @@ export async function POST(req: NextRequest) {
     const res = await fetch(firstUrl);
     if (!res.ok) throw new Error(`Failed to fetch photo from URL: ${res.statusText}`);
     const buffer = await res.arrayBuffer();
-    const base64Image = Buffer.from(buffer).toString("base64");
+    const b64 = Buffer.from(buffer).toString("base64");
 
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
 
-    const googleRes = await fetch(url, {
+    const gRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{
-          parts: [
-            { text: "Return eBay listing JSON: { 'title': 'string', 'price': number, 'category': 'string', 'categoryId': 'string', 'item_specifics': {}, 'description': 'string' }" },
-            { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: base64Image } }
-          ]
-        }],
+        contents: [{ parts: [{ text: "Return eBay JSON: { 'title': 'string', 'price': 1.99, 'category': 'string', 'categoryId': 'string', 'item_specifics': {}, 'description': 'string' }" }, { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: b64 } }] }],
         generationConfig: { responseMimeType: "application/json" }
       })
     });
 
-    const result = await googleRes.json();
+    const result = await gRes.json();
 
-    if (!googleRes.ok) {
+    if (!gRes.ok) {
       return NextResponse.json({ 
-        error: "Google API Rejected", 
+        error: "Google API Rejected v1beta", 
         detail: result.error?.message || "Unknown error",
-        status: googleRes.status 
-      }, { status: googleRes.status });
+        status: gRes.status 
+      }, { status: gRes.status });
     }
 
     const rawText = result.candidates[0].content.parts[0].text;
@@ -67,13 +62,14 @@ export async function POST(req: NextRequest) {
       ...listing,
       id: validId,
       title: listing.title || "Untitled Listing",
+      price: listing.price || 1.99,
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 44
+      v: 45
     });
 
-  } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 });
   }
 }
