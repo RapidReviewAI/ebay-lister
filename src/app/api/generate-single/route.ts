@@ -8,24 +8,12 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `Analyze the provided images of an item (or group of items). 
-1. IDENTIFY: Is this a single item or a lot of multiple items? 
-2. TITLE: Create an 80-character eBay title. If it is a lot, include 'Lot of X' or 'Set'. 
-3. CATEGORY: Suggest the most accurate eBay Category Name (e.g., 'Clothing, Shoes & Accessories > Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Tops, Shirts & T-Shirts').
-4. DESCRIPTION: Write a detailed plain-text description. Mention brands, sizes, colors, and condition for all items in the image.
-5. SPECS: Generate a JSON object of item specifics.
-6. ROTATION: Clockwise rotation (0, 90, 180, 270) to make the primary item upright.
-
-OUTPUT ONLY VALID JSON:
-{
-  "title": "string",
-  "category_suggestion": "string",
-  "description": "string",
-  "suggested_price": number,
-  "rotation": number,
-  "is_lot": boolean,
-  "item_specifics": { "Brand": "string", "Size": "string", "Color": "string" }
-}`.trim();
+const SYSTEM_INSTRUCTION = `You are an eBay SEO Expert. Analyze the images.
+1. TITLE: 80 chars max. Format: [Brand] [Model/Name] [Gender/Size] [Color] [Key Feature/Condition]. No fluff words (L@@K, WOW).
+2. CATEGORY: Provide exact eBay Category ID and Breadcrumb.
+3. ITEM SPECIFICS: Output as a flat JSON object. Use standard eBay keys.
+4. CONDITION: Identify if New with Tags (NWT), Pre-owned, or Damaged.
+OUTPUT: JSON only.`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -63,7 +51,7 @@ export async function POST(req: NextRequest) {
 
     const { photos } = await req.json();
     if (!photos || !Array.isArray(photos) || photos.length === 0) {
-      return NextResponse.json({ error: "No photos." }, { status: 400 });
+      return NextResponse.json({ error: "No photos provided." }, { status: 400 });
     }
 
     const imageParts = await Promise.all(photos.map(imageUrlToInlineData));
@@ -131,8 +119,9 @@ export async function POST(req: NextRequest) {
       brand: listing.brand || findSpec("Brand") || "Unbranded",
       size: listing.size || findSpec("Size") || "N/A",
       color: listing.color || findSpec("Color") || "Multi-Color",
-      category: listing.category_suggestion || listing.category || "Collectibles > Non-Sport Trading Cards",
+      category: listing.category || listing.category_suggestion || "Collectibles > Non-Sport Trading Cards",
       categoryId: listing.categoryId || "183050",
+      condition: listing.condition || "3000",
       is_lot: listing.is_lot ?? false,
       rotation: rot,
     };
@@ -151,7 +140,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 24
+      v: 26
     });
 
   } catch (error: any) {
