@@ -7,28 +7,10 @@ export async function POST(req: NextRequest) {
   try {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
-    if (!API_KEY) return NextResponse.json({ error: "API_KEY_MISSING" }, { status: 500 });
+    
+    if (!API_KEY) return NextResponse.json({ error: "API_KEY is missing in Vercel environment." }, { status: 500 });
     if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided." }, { status: 400 });
 
-    // 1. DISCOVERY PHASE: Ask Google what models THIS KEY can actually use
-    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${API_KEY}`;
-    const listRes = await fetch(listUrl);
-    const listData = await listRes.json();
-
-    // Log the available models to your Vercel logs so you can see them!
-    console.log("FRANK SYSTEM LOG - AVAILABLE MODELS:", JSON.stringify(listData.models?.map((m: any) => m.name)));
-
-    // 2. SELECTION PHASE: Find the first 1.5-flash model in the list
-    // This bypasses the naming drama. If Google renamed it 'gemini-1.5-flash-v2-beta-whatever', we will find it.
-    const workingModel = listData.models?.find((m: any) => 
-      (m.name.includes("gemini-1.5-flash") || m.name.includes("flash")) &&
-      m.supportedGenerationMethods?.includes("generateContent")
-    );
-
-    const modelName = workingModel ? workingModel.name : "models/gemini-1.5-flash"; // Fallback to standard
-    console.log(`FRANK SYSTEM LOG - PICKED MODEL: ${modelName}`);
-
-    // 3. GENERATION PHASE
     const firstUrl = photos[0].includes("cloudinary.com")
       ? photos[0].replace("/upload/", "/upload/c_limit,w_600,q_auto:low/")
       : photos[0];
@@ -38,10 +20,9 @@ export async function POST(req: NextRequest) {
     const buffer = await res.arrayBuffer();
     const base64Image = Buffer.from(buffer).toString("base64");
 
-    const endpointPath = modelName.startsWith("models/") ? modelName : `models/${modelName}`;
-    const genUrl = `https://generativelanguage.googleapis.com/v1beta/${endpointPath}:generateContent?key=${API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
 
-    const googleRes = await fetch(genUrl, {
+    const googleRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -60,8 +41,8 @@ export async function POST(req: NextRequest) {
     if (!googleRes.ok) {
       return NextResponse.json({ 
         error: "Google API Rejected", 
-        detail: result.error?.message || "Check Logs",
-        available_models: listData.models?.map((m: any) => m.name) || "None"
+        detail: result.error?.message || "Unknown error",
+        status: googleRes.status 
       }, { status: googleRes.status });
     }
 
@@ -89,8 +70,7 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      model_used: modelName,
-      v: 43
+      v: 44
     });
 
   } catch (error: any) {
