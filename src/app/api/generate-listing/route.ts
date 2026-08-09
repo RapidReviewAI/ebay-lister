@@ -8,26 +8,27 @@ export async function POST(req: NextRequest) {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
     
-    if (!API_KEY) return NextResponse.json({ error: "API_KEY_MISSING_IN_VERCEL" }, { status: 500 });
-    if (!photos?.length) return NextResponse.json({ error: "No photos provided" }, { status: 400 });
+    if (!API_KEY) return NextResponse.json({ error: "API_KEY is missing in Vercel environment." }, { status: 500 });
+    if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided." }, { status: 400 });
 
-    // FRANK'S LIGHTWEIGHT IMAGE PREP
+    // Optimize first photo for speed and payload limits
     const firstUrl = photos[0].includes("cloudinary.com")
       ? photos[0].replace("/upload/", "/upload/c_limit,w_600,q_auto:low/")
       : photos[0];
-    
+
     const res = await fetch(firstUrl);
     if (!res.ok) throw new Error(`Failed to fetch photo from URL: ${res.statusText}`);
     const buffer = await res.arrayBuffer();
     const base64Image = Buffer.from(buffer).toString("base64");
 
-    // THE STABLE US URL (NO BETA, NO VERSIONED SUFFIX)
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+    // THE ABSOLUTE URL FOR US PROJECTS (STABLE V1)
+    // We use the full 'models/gemini-1.5-flash' path as required by the REST spec
+    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
     const payload = {
       contents: [{
         parts: [
-          { text: "Return eBay listing JSON with keys: title, price (number), category, categoryId, item_specifics (flat object), description. Category for sports cards is 261328." },
+          { text: "Return eBay listing JSON: { 'title': 'string', 'price': number, 'category': 'string', 'categoryId': 'string', 'item_specifics': {}, 'description': 'string' }" },
           { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: base64Image } }
         ]
       }],
@@ -43,11 +44,9 @@ export async function POST(req: NextRequest) {
     const result = await googleRes.json();
 
     if (!googleRes.ok) {
-      // THIS WILL CAPTURE THE EXACT REASON (e.g., API NOT ENABLED)
-      console.error("GOOGLE API REJECTION:", JSON.stringify(result));
+      console.error("GOOGLE REJECTION:", result);
       return NextResponse.json({ 
-        error: "Google API Rejected", 
-        detail: result.error?.message || "Unknown error",
+        error: result.error?.message || "Google API Error",
         status: googleRes.status 
       }, { status: googleRes.status });
     }
@@ -76,7 +75,7 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 40
+      v: 41
     });
 
   } catch (error: any) {
