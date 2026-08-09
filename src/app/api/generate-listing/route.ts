@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
 import { v4 as uuidv4 } from "uuid";
 
 export const maxDuration = 60;
@@ -12,14 +11,7 @@ export async function POST(req: NextRequest) {
     if (!API_KEY) return NextResponse.json({ error: "Missing API Key" }, { status: 500 });
     if (!photos?.length) return NextResponse.json({ error: "No photos" }, { status: 400 });
 
-    const genAI = new GoogleGenerativeAI(API_KEY);
-
-    // FRANK'S MODEL FALLBACK LIST: 
-    // Google changes these aliases frequently. We try the most likely winners.
-    const MODELS_TO_TRY = ["gemini-1.5-flash-latest", "gemini-1.5-flash", "gemini-1.5-flash-001"];
-    let lastError = "";
-
-    // Optimized images for platform limits
+    // FRANK'S PERFORMANCE HACK: Downscale for Vercel limits
     const optimizedPhotos = photos.slice(0, 2).map((url: string) => {
       if (url.includes("cloudinary.com")) {
         if (url.includes("/upload/a_auto/")) {
@@ -36,7 +28,12 @@ export async function POST(req: NextRequest) {
           const res = await fetch(url);
           if (!res.ok) return null;
           const buffer = await res.arrayBuffer();
-          return { inlineData: { data: Buffer.from(buffer).toString("base64"), mimeType: res.headers.get("content-type") || "image/jpeg" } };
+          return {
+            inline_data: {
+              mime_type: res.headers.get("content-type") || "image/jpeg",
+              data: Buffer.from(buffer).toString("base64")
+            }
+          };
         } catch {
           return null;
         }
@@ -46,35 +43,39 @@ export async function POST(req: NextRequest) {
     const validParts = imageParts.filter(Boolean);
     if (!validParts.length) throw new Error("Failed to process any images.");
 
-    const prompt = "Return eBay JSON: title, price, category, categoryId, item_specifics. Category for cards is 261328.";
+    // CALLING STABLE V1 DIRECTLY - NO SDK
+    const genAIUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
 
-    // ATTEMPT GENERATION WITH FALLBACKS
-    let result;
-    let successfulModel = "";
-    for (const modelName of MODELS_TO_TRY) {
-      try {
-        const currentModel = genAI.getGenerativeModel({ model: modelName });
-        result = await currentModel.generateContent([prompt, ...validParts as any]);
-        if (result) {
-          successfulModel = modelName;
-          break; // We found a working model!
-        }
-      } catch (e: any) {
-        lastError = e.message;
-        continue; // Try the next model in the list
-      }
+    const payload = {
+      contents: [{
+        parts: [
+          { text: "Return eBay listing JSON. Keys: title, price (number), category, categoryId, item_specifics (flat object), description. Category for cards is 261328." },
+          ...validParts
+        ]
+      }],
+      generationConfig: { responseMimeType: "application/json" }
+    };
+
+    const googleRes = await fetch(genAIUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+
+    if (!googleRes.ok) {
+      const errorData = await googleRes.json();
+      throw new Error(`Google API Error: ${errorData.error?.message || googleRes.statusText}`);
     }
 
-    if (!result) throw new Error(`All models failed. Last error: ${lastError}`);
-
-    const response = await result.response;
-    const text = response.text().replace(/```json|```/g, "").trim();
+    const result = await googleRes.json();
+    const text = result.candidates[0].content.parts[0].text;
+    const cleanText = text.replace(/```json|```/g, "").trim();
     
     let listing: any;
     try {
-      listing = JSON.parse(text);
+      listing = JSON.parse(cleanText);
     } catch {
-      const match = text.match(/\{[\s\S]*\}/);
+      const match = cleanText.match(/\{[\s\S]*\}/);
       listing = match ? JSON.parse(match[0]) : {};
     }
 
@@ -91,14 +92,14 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      model_used: successfulModel,
-      v: 35
+      v: 36
     });
 
   } catch (error: any) {
+    console.error("FRANK REST CRASH:", error.message);
     return NextResponse.json({ 
       error: error.message, 
-      frank_hint: "Check model availability in your region" 
+      frank_hint: "Stable V1 Endpoint Attempted" 
     }, { status: 500 });
   }
 }
