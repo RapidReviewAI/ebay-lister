@@ -1,20 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import { v4 as uuidv4 } from "uuid";
 
-export const maxDuration = 300;
+export const maxDuration = 60; // Extend Vercel timeout to 60s
 
 export async function POST(req: NextRequest) {
   try {
-    const { photos } = await req.json();
-    if (!photos || !Array.isArray(photos) || photos.length === 0) {
-      return NextResponse.json({ error: "No photos." }, { status: 400 });
-    }
-
+    // 1. ENV CHECK
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
-    if (!API_KEY) {
-      return NextResponse.json({ error: "API Key missing." }, { status: 401 });
-    }
+    if (!API_KEY) throw new Error("GEMINI_API_KEY is missing in environment variables.");
+
+    const { photos } = await req.json();
+    if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided" }, { status: 400 });
 
     const genAI = new GoogleGenerativeAI(API_KEY);
     const model = genAI.getGenerativeModel({ 
@@ -22,66 +18,72 @@ export async function POST(req: NextRequest) {
       generationConfig: { responseMimeType: "application/json" }
     });
 
+    // 2. RESILIENT IMAGE FETCHING
     const imageParts = await Promise.all(
-      photos.slice(0, 3).map(async (imgStr: string) => {
-        let finalUrl = imgStr;
-        if (imgStr.includes("cloudinary.com") && !imgStr.includes("a_auto")) {
-          finalUrl = imgStr.replace("/upload/", "/upload/a_auto/");
-        }
-        let b64 = finalUrl;
-        let mime = "image/jpeg";
-
-        if (finalUrl.startsWith("http://") || finalUrl.startsWith("https://")) {
-          const res = await fetch(finalUrl);
-          const buf = await res.arrayBuffer();
-          b64 = Buffer.from(buf).toString("base64");
-          mime = res.headers.get("content-type") ?? "image/jpeg";
-        } else if (finalUrl.includes(";base64,")) {
-          const split = finalUrl.split(";base64,");
-          b64 = split[1] || finalUrl;
-          mime = split[0].split(":")[1] || "image/jpeg";
-        }
-        return { inlineData: { data: b64, mimeType: mime } };
+      photos.slice(0, 3).map(async (url: string) => {
+        try {
+          let finalUrl = url;
+          if (url.includes("cloudinary.com") && !url.includes("a_auto")) {
+            finalUrl = url.replace("/upload/", "/upload/a_auto/");
+          }
+          if (finalUrl.startsWith("http://") || finalUrl.startsWith("https://")) {
+            const res = await fetch(finalUrl);
+            if (!res.ok) return null;
+            const buffer = await res.arrayBuffer();
+            return {
+              inlineData: {
+                data: Buffer.from(buffer).toString("base64"),
+                mimeType: res.headers.get("content-type") || "image/jpeg",
+              },
+            };
+          } else if (finalUrl.includes(";base64,")) {
+            const split = finalUrl.split(";base64,");
+            return {
+              inlineData: {
+                data: split[1] || finalUrl,
+                mimeType: split[0].split(":")[1] || "image/jpeg",
+              },
+            };
+          }
+          return null;
+        } catch (e) { return null; }
       })
     );
 
-    const prompt = `Return eBay listing JSON. 
-    Keys: "title" (80 chars), "price" (number), "category" (breadcrumb), "categoryId" (string), "item_specifics" (flat object), "description" (string). 
-    If this is a sports card, use CategoryId 261328.`;
+    const validImageParts = imageParts.filter(Boolean);
+    if (validImageParts.length === 0) throw new Error("Failed to process any images.");
 
-    const result = await model.generateContent([prompt, ...imageParts]);
-    const responseText = result.response.text();
+    const prompt = `Return eBay listing JSON. 
+    Required Keys: "title", "price" (number), "category", "categoryId", "item_specifics" (flat object), "description". 
+    Context: Sports cards category is 261328.`;
+
+    const result = await model.generateContent([prompt, ...validImageParts as any]);
+    const text = result.response.text();
     
-    // FRANK'S FAIL-SAFE PARSER
+    // 3. SAFE PARSING
     let listing: any;
     try {
-      listing = JSON.parse(responseText);
+      listing = JSON.parse(text);
     } catch (e) {
-      const match = responseText.match(/\{[\s\S]*\}/);
+      const match = text.match(/\{[\s\S]*\}/);
       listing = match ? JSON.parse(match[0]) : {};
     }
 
-    const catId = String(listing.categoryId || listing.category_id || "1");
-    const titleLower = (listing.title || "").toLowerCase();
-    const finalCatId = (titleLower.includes("card") || titleLower.includes("topps") || titleLower.includes("panini") || titleLower.includes("bowman")) ? "261328" : catId;
+    // 4. STABLE UUID & RESPONSE
+    const fallbackId = Date.now().toString(36) + Math.random().toString(36).substring(2);
 
-    const validId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : uuidv4();
-
-    // ENSURE FLATNESS - No more 'specifics' nesting
     return NextResponse.json({
-      id: validId,
+      ...listing,
+      id: fallbackId,
       title: listing.title || "Untitled Listing",
-      price: listing.price || 0.99,
-      category: listing.category || listing.category_suggestion || "Uncategorized",
-      categoryId: finalCatId,
+      categoryId: String(listing.categoryId || "1"),
       item_specifics: listing.item_specifics || {},
-      description: listing.description || "",
       photos: photos,
-      v: 32
+      v: 33
     });
 
   } catch (error: any) {
-    console.error("API CRASH:", error.message);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("FRANK API ERROR:", error.message);
+    return NextResponse.json({ error: error.message, stack: error.stack }, { status: 500 });
   }
 }
