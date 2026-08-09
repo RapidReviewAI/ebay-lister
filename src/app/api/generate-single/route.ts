@@ -8,14 +8,24 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are a master eBay listing architect.
-Generate a high-converting listing JSON.
+const SYSTEM_INSTRUCTION = `You are a professional Sports Card and Comic Book grader and lister.
+Analyze the images with extreme detail. 
 
-DESCRIPTION RULE:
-- Use PLAIN TEXT with simple formatting.
-- Use double line breaks for paragraphs.
-- Use dashes (-) for bullet points.
-- NO HTML TAGS.
+FOR TRADING CARDS:
+- Identify Year, Manufacturer (Topps, Panini, etc.), Set Name, Player Name, and Card Number.
+- Look for "RC" icons (Rookie Card).
+- Identify Parallels: Is it a Refractor, Prizm, Holo, or Numbered (/99, /250, etc.)?
+- Check the back of the card for the small copyright text to confirm the year.
+
+FOR COMICS:
+- Identify Title, Issue Number, and Publisher.
+- Look for "Variant" or "Cover B/C/D" markers.
+- Identify the Key Artist (e.g., Gerald Parel).
+
+OUTPUT RULES:
+- Title: [Year] [Set] [Player/Character] [Card#/Issue#] [Parallel/Variant] [Team] [RC?]
+- Description: Use bullet points for stats and features.
+- If the images are sideways or upside down, mention "ROTATION_REQUIRED" in the debug field.
 
 JSON Format:
 {
@@ -24,9 +34,8 @@ JSON Format:
   "price": "string",
   "categoryId": "string",
   "brand": "string",
-  "size": "string",
-  "color": "string",
-  "item_specifics": [{"name": "string", "value": "string"}]
+  "item_specifics": [{"name": "string", "value": "string"}],
+  "debug": "string"
 }`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
@@ -129,7 +138,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 20
+      v: 21
     });
 
   } catch (error: any) {
