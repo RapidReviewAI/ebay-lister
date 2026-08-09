@@ -492,6 +492,11 @@ export default function BatchPage() {
           <div className="fixed inset-y-0 right-0 w-full max-w-xl bg-white shadow-2xl border-l border-slate-200 z-50 overflow-y-auto animate-in slide-in-from-right duration-300">
             <ListingReview
               item={selectedListing}
+              userProfile={{
+                default_shipping_profile: shippingProfileId,
+                default_return_policy: returnProfileId,
+                default_payment_policy: paymentProfileId,
+              }}
               onClose={() => setSelectedListing(null)}
               onUpdate={(updatedItem) => {
                 setSelectedListing(updatedItem);
