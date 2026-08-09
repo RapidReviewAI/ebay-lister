@@ -8,17 +8,14 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are an inventory clerk. Return ONLY a JSON object for an eBay listing based on these images.
-REQUIRED KEYS:
-"title": 80 char SEO title.
-"category": Full eBay path.
-"categoryId": eBay numeric ID.
-"description": Plain text details.
-"price": Suggested retail price.
-"item_specifics": { "Brand": "...", "Size": "...", "Color": "..." }
-"is_lot": true/false.
-
-If you cannot identify the item, guess based on visual cues. NEVER return empty values.`.trim();
+const SYSTEM_INSTRUCTION = `Return ONLY a flat JSON object.
+Required Keys:
+"title": 80 chars max.
+"price": number.
+"category": "Sports Mem, Cards & Fan Shop > Sports Trading Cards > Trading Card Singles"
+"categoryId": "261328"
+"item_specifics": {"Graded":"No","Sport":"Baseball","Set":"Topps Stars of MLB","Player/Athlete":"Name","Team":"Team Name","Year Manufactured":"2024","Features":"Rookie"}
+"description": "Plain text description."`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -100,49 +97,41 @@ export async function POST(req: NextRequest) {
       console.error("Failed to parse Gemini response:", rawText);
       listing = {
         title: "Manual Review Required: " + (rawText.substring(0, 30) || "Empty Response"),
-        category: "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops",
-        categoryId: "51959",
-        item_specifics: { Brand: "Unknown", Size: "3T", Color: "Multi" }
+        category: "Sports Mem, Cards & Fan Shop > Sports Trading Cards > Trading Card Singles",
+        categoryId: "261328",
+        item_specifics: { Graded: "No", Sport: "Baseball", Set: "Topps", "Player/Athlete": "Unknown" }
       };
     }
 
-    // 1. ABSOLUTE CATEGORY ID MAPPING
-    let finalCategoryId = "1"; // Default to 'Collectibles'
-    const rawCategory = listing.category || listing.category_suggestion || "";
-    const catText = (typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "") : String(rawCategory)).toLowerCase();
-    const titleText = (listing.title || "").toLowerCase();
+    // Absolute Category Mapping for Sports Cards
+    let finalCatId = listing.categoryId || listing.category_id || "261328";
+    const titleLower = (listing.title || "").toLowerCase();
+    const rawCategory = listing.category || listing.category_suggestion || "Sports Mem, Cards & Fan Shop > Sports Trading Cards > Trading Card Singles";
+    const catLower = (typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "") : String(rawCategory)).toLowerCase();
 
-    if (catText.includes("toddler") || titleText.includes("shirt") || titleText.includes("polo")) {
-      finalCategoryId = "51959"; // Baby & Toddler Tops
-    } else if (catText.includes("card") || titleText.includes("trading card") || titleText.includes("rookie")) {
-      finalCategoryId = "183050"; // Non-Sport Cards
-    } else if (catText.includes("toy") || catText.includes("action figure")) {
-      finalCategoryId = "246"; // Action Figures
-    } else if (listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "")) {
-      finalCategoryId = String(listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "1"));
+    if (titleLower.includes("card") || titleLower.includes("topps") || titleLower.includes("panini") || titleLower.includes("bowman") || catLower.includes("card")) {
+      finalCatId = "261328"; // Correct ID for Sports Trading Card Singles
+    } else if (titleLower.includes("shirt") || titleLower.includes("polo") || catLower.includes("toddler")) {
+      finalCatId = "51959"; // Baby & Toddler Tops
     }
 
-    // 2. GUARANTEE SPECIFICS STRUCTURE
+    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Sports Mem, Cards & Fan Shop > Sports Trading Cards > Trading Card Singles") : String(rawCategory);
+
+    // Force item_specifics to be a flat object
     const rawSpecs = listing.item_specifics || listing.specifics || {};
     const finalSpecs = Array.isArray(rawSpecs)
       ? rawSpecs.reduce((acc: any, spec: any) => {
-          if (spec?.name) acc[spec.name] = String(spec.value ?? "");
+          if (Array.isArray(spec)) {
+            acc[spec[0]] = String(spec[1] ?? "");
+          } else if (spec?.name) {
+            acc[spec.name] = String(spec.value ?? "");
+          }
           return acc;
         }, {})
       : Object.entries(rawSpecs).reduce((acc: any, [k, v]) => {
           acc[k] = String(v ?? "");
           return acc;
         }, {});
-
-    // Force standard keys if missing for clothes
-    if (finalCategoryId === "51959") {
-      if (!finalSpecs.Brand) finalSpecs.Brand = listing.brand || "Unbranded";
-      if (!finalSpecs.Size) finalSpecs.Size = listing.size || "3T";
-      if (!finalSpecs.Color) finalSpecs.Color = listing.color || "Multicolor";
-      if (!finalSpecs.Department) finalSpecs.Department = listing.department || "Boys";
-    }
-
-    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : (String(rawCategory) || "General > Items");
 
     // Auto-apply rotation to Cloudinary image URLs if rotation is non-zero
     let finalPhotos = [...photos];
@@ -157,7 +146,7 @@ export async function POST(req: NextRequest) {
     }
 
     const priceVal = listing.suggested_price || listing.price || "19.99";
-    const finalTitle = listing.title || "Bulk Item Listing";
+    const finalTitle = listing.title || "Trading Card Listing";
 
     const refinedListing = {
       ...listing,
@@ -166,7 +155,7 @@ export async function POST(req: NextRequest) {
       size: finalSpecs.Size || listing.size || "N/A",
       color: finalSpecs.Color || listing.color || "Multi-Color",
       category: finalCategory,
-      categoryId: finalCategoryId,
+      categoryId: finalCatId,
       condition: listing.condition || "3000",
       is_lot: listing.is_lot ?? false,
       rotation: rot,
@@ -186,11 +175,11 @@ export async function POST(req: NextRequest) {
       id: validId,
       title: finalTitle,
       category: finalCategory,
-      categoryId: finalCategoryId,
+      categoryId: finalCatId,
       item_specifics: finalSpecs,
       photos: orderedPhotos,
       model_debug: modelUsed + " | " + rawText.substring(0, 100),
-      v: 30
+      v: 31
     });
 
   } catch (error: any) {

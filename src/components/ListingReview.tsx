@@ -27,20 +27,24 @@ export default function ListingReview({
 }: ListingReviewProps) {
   const [showPreview, setShowPreview] = useState(false);
 
-  console.log("Frank Debug - Current Item Specifics:", item.item_specifics);
+  console.log("FRANK DEBUG - Full Item Object:", JSON.stringify(item, null, 2));
 
   // Helper to normalize item_specifics as key-value pairs
   const getSpecificsEntries = (): [string, string][] => {
     if (!item.item_specifics) return [];
+
+    // If it's already an array of [key, value] or [{name, value}]
     if (Array.isArray(item.item_specifics)) {
-      return item.item_specifics.map((s: any) => [
-        s.name || s.key || "Property",
-        String(s.value ?? ""),
-      ]);
+      return item.item_specifics.map((s: any) =>
+        Array.isArray(s) ? [String(s[0]), String(s[1])] : [s.name || s.key || "Property", String(s.value ?? "")]
+      );
     }
+
+    // If it's a standard object { Brand: 'Topps' }
     if (typeof item.item_specifics === "object") {
       return Object.entries(item.item_specifics).map(([k, v]) => [k, String(v ?? "")]);
     }
+
     return [];
   };
 
