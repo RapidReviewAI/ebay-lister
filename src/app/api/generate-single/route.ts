@@ -8,10 +8,10 @@ export async function POST(req: NextRequest) {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
     
-    if (!API_KEY) return NextResponse.json({ error: "API_KEY is missing in Vercel environment." }, { status: 500 });
+    if (!API_KEY) return NextResponse.json({ error: "API_KEY_MISSING_IN_VERCEL" }, { status: 500 });
     if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided." }, { status: 400 });
 
-    // Optimize first photo for speed and payload limits
+    // LIGHTWEIGHT IMAGE PREP - ONE PHOTO ONLY FOR STABILITY
     const firstUrl = photos[0].includes("cloudinary.com")
       ? photos[0].replace("/upload/", "/upload/c_limit,w_600,q_auto:low/")
       : photos[0];
@@ -21,9 +21,9 @@ export async function POST(req: NextRequest) {
     const buffer = await res.arrayBuffer();
     const base64Image = Buffer.from(buffer).toString("base64");
 
-    // THE ABSOLUTE URL FOR US PROJECTS (STABLE V1)
-    // We use the full 'models/gemini-1.5-flash' path as required by the REST spec
-    const url = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${API_KEY}`;
+    // THE ONLY URL THAT WORKS IN THE US FOR 1.5 FLASH RIGHT NOW
+    // Switching back to v1beta because Google v1 is lying to us.
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
 
     const payload = {
       contents: [{
@@ -32,7 +32,10 @@ export async function POST(req: NextRequest) {
           { inline_data: { mime_type: res.headers.get("content-type") || "image/jpeg", data: base64Image } }
         ]
       }],
-      generationConfig: { responseMimeType: "application/json" }
+      generationConfig: { 
+        responseMimeType: "application/json",
+        temperature: 0.1 
+      }
     };
 
     const googleRes = await fetch(url, {
@@ -44,9 +47,9 @@ export async function POST(req: NextRequest) {
     const result = await googleRes.json();
 
     if (!googleRes.ok) {
-      console.error("GOOGLE REJECTION:", result);
       return NextResponse.json({ 
-        error: result.error?.message || "Google API Error",
+        error: "Google API Rejected v1beta", 
+        detail: result.error?.message || "Unknown error",
         status: googleRes.status 
       }, { status: googleRes.status });
     }
@@ -75,7 +78,7 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 41
+      v: 42
     });
 
   } catch (error: any) {
