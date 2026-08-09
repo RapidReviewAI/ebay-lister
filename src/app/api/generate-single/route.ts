@@ -8,26 +8,24 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `Analyze the provided product image for an e-commerce listing. 
-1. TEXT DETECTION: Identify any text, logos, or brand markings. 
-2. LOGIC: Determine necessary clockwise rotation (0, 90, 180, 270) to make it upright.
-3. DESCRIPTION: Write a concise, professional plain-text description (no HTML). Focus on condition, key features, and what is included.
-4. OUTPUT: Return the following JSON:
+const SYSTEM_INSTRUCTION = `Analyze the provided images of an item (or group of items). 
+1. IDENTIFY: Is this a single item or a lot of multiple items? 
+2. TITLE: Create an 80-character eBay title. If it is a lot, include 'Lot of X' or 'Set'. 
+3. CATEGORY: Suggest the most accurate eBay Category Name (e.g., 'Clothing, Shoes & Accessories > Kids > Boys > Boys' Clothing (Sizes 4 & Up) > Tops, Shirts & T-Shirts').
+4. DESCRIPTION: Write a detailed plain-text description. Mention brands, sizes, colors, and condition for all items in the image.
+5. SPECS: Generate a JSON object of item specifics.
+6. ROTATION: Clockwise rotation (0, 90, 180, 270) to make the primary item upright.
+
+OUTPUT ONLY VALID JSON:
 {
-  "rotation_logic": "string",
-  "rotation": 0,
-  "title": "Optimized eBay Title (80 chars)",
-  "brand": "string",
-  "description": "Plain text product description",
-  "suggested_price": 0.00,
-  "item_specifics": {
-    "Brand": "string",
-    "Model": "string",
-    "Color": "string",
-    "Condition": "string"
-  }
-}
-STRICT RULE: The 'rotation' must be 0, 90, 180, or 270. All fields are required.`.trim();
+  "title": "string",
+  "category_suggestion": "string",
+  "description": "string",
+  "suggested_price": number,
+  "rotation": number,
+  "is_lot": boolean,
+  "item_specifics": { "Brand": "string", "Size": "string", "Color": "string" }
+}`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -70,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     const imageParts = await Promise.all(photos.map(imageUrlToInlineData));
     const MODELS_TO_TRY = ["gemini-flash-latest", "gemini-1.5-flash"];
-    let responseText = "";
+    let rawText = "";
     let modelUsed = "";
 
     for (const modelName of MODELS_TO_TRY) {
@@ -86,8 +84,8 @@ export async function POST(req: NextRequest) {
           "Generate the eBay listing JSON now."
         ]);
 
-        responseText = result.response.text();
-        if (responseText) {
+        rawText = result.response.text();
+        if (rawText) {
           modelUsed = modelName;
           break;
         }
@@ -97,9 +95,11 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!responseText) throw new Error("All models failed to generate content.");
+    if (!rawText) throw new Error("All models failed to generate content.");
 
-    const listing = JSON.parse(responseText.replace(/```json|```/g, "").trim());
+    // Clean JSON markdown backticks before parsing
+    const cleanJson = rawText.replace(/```json|```/g, "").trim();
+    const listing = JSON.parse(cleanJson);
 
     // Helper to find specific values if item_specifics is an array or object
     const findSpec = (name: string) => {
@@ -131,8 +131,9 @@ export async function POST(req: NextRequest) {
       brand: listing.brand || findSpec("Brand") || "Unbranded",
       size: listing.size || findSpec("Size") || "N/A",
       color: listing.color || findSpec("Color") || "Multi-Color",
-      category: listing.category || "Collectibles > Non-Sport Trading Cards",
+      category: listing.category_suggestion || listing.category || "Collectibles > Non-Sport Trading Cards",
       categoryId: listing.categoryId || "183050",
+      is_lot: listing.is_lot ?? false,
       rotation: rot,
     };
 
@@ -150,7 +151,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 23
+      v: 24
     });
 
   } catch (error: any) {
