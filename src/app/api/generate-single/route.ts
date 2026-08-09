@@ -8,18 +8,26 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `Analyze the provided image of a retail product. 
-1. Determine the orientation of the item. 
-2. Specify the clockwise rotation in degrees (0, 90, 180, or 270) required to make the product appear perfectly upright and professionally aligned for an e-commerce listing. 
-3. Return the result strictly in the following JSON format: 
+const SYSTEM_INSTRUCTION = `Analyze the provided product image for an e-commerce listing. 
+1. TEXT DETECTION: Identify any text, logos, or brand markings. 
+2. LOGIC: Determine necessary clockwise rotation (0, 90, 180, 270) to make it upright.
+3. DESCRIPTION: Write a concise, professional plain-text description (no HTML). Focus on condition, key features, and what is included.
+4. OUTPUT: Return the following JSON:
 {
-  "rotation": number,
-  "title": "string",
+  "rotation_logic": "string",
+  "rotation": 0,
+  "title": "Optimized eBay Title (80 chars)",
   "brand": "string",
-  "suggested_price": number,
-  "item_specifics": { "key": "value" }
+  "description": "Plain text product description",
+  "suggested_price": 0.00,
+  "item_specifics": {
+    "Brand": "string",
+    "Model": "string",
+    "Color": "string",
+    "Condition": "string"
+  }
 }
-Note: If the image is already upright, rotation must be 0. Do not guess; if the orientation is ambiguous, return 0.`.trim();
+STRICT RULE: The 'rotation' must be 0, 90, 180, or 270. All fields are required.`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -142,7 +150,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 22
+      v: 23
     });
 
   } catch (error: any) {
