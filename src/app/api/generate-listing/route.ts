@@ -4,12 +4,12 @@ import { v4 as uuidv4 } from "uuid";
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-// BROWSER TEST: Visit /api/generate-listing in your address bar.
+// TEST THIS IN BROWSER: https://ebay-lister-azure.vercel.app/api/generate-listing
 export async function GET() {
   return NextResponse.json({ 
-    msg: "THE TOWER IS ALIVE", 
-    v: 48,
-    env_check: (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY) ? "KEY_FOUND" : "KEY_MISSING" 
+    status: "GENERATOR_FOLDER_FOUND", 
+    v: 49,
+    key_check: (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY) ? "EXISTS" : "MISSING"
   });
 }
 
@@ -17,10 +17,12 @@ export async function POST(req: NextRequest) {
   try {
     const { photos } = await req.json();
     const API_KEY = (process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || "").trim();
-    
     if (!API_KEY) return NextResponse.json({ error: "KEY_MISSING" }, { status: 500 });
     if (!photos || !photos.length) return NextResponse.json({ error: "No photos provided." }, { status: 400 });
 
+    // Direct REST call to bypass SDK overhead entirely
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
+    
     const firstUrl = photos[0].includes("cloudinary.com")
       ? photos[0].replace("/upload/", "/upload/c_limit,w_600,q_auto:low/")
       : photos[0];
@@ -30,7 +32,6 @@ export async function POST(req: NextRequest) {
     const buffer = await res.arrayBuffer();
     const b64 = Buffer.from(buffer).toString("base64");
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
     const gRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -75,9 +76,9 @@ export async function POST(req: NextRequest) {
       categoryId: finalCatId,
       item_specifics: listing.item_specifics || {},
       photos: photos,
-      v: 48
+      v: 49
     });
   } catch (e: any) {
-    return NextResponse.json({ error: e.message, hint: "Frank V48 Hit" }, { status: 500 });
+    return NextResponse.json({ error: e.message, route: "api/generate-listing" }, { status: 500 });
   }
 }
