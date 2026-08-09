@@ -8,35 +8,18 @@ const genAI = new GoogleGenerativeAI(
 
 export const maxDuration = 300;
 
-const SYSTEM_INSTRUCTION = `You are a professional Sports Card and Comic Book grader and lister.
-Analyze the images with extreme detail. 
-
-FOR TRADING CARDS:
-- Identify Year, Manufacturer (Topps, Panini, etc.), Set Name, Player Name, and Card Number.
-- Look for "RC" icons (Rookie Card).
-- Identify Parallels: Is it a Refractor, Prizm, Holo, or Numbered (/99, /250, etc.)?
-- Check the back of the card for the small copyright text to confirm the year.
-
-FOR COMICS:
-- Identify Title, Issue Number, and Publisher.
-- Look for "Variant" or "Cover B/C/D" markers.
-- Identify the Key Artist (e.g., Gerald Parel).
-
-OUTPUT RULES:
-- Title: [Year] [Set] [Player/Character] [Card#/Issue#] [Parallel/Variant] [Team] [RC?]
-- Description: Use bullet points for stats and features.
-- If the images are sideways or upside down, mention "ROTATION_REQUIRED" in the debug field.
-
-JSON Format:
+const SYSTEM_INSTRUCTION = `Analyze the provided image of a retail product. 
+1. Determine the orientation of the item. 
+2. Specify the clockwise rotation in degrees (0, 90, 180, or 270) required to make the product appear perfectly upright and professionally aligned for an e-commerce listing. 
+3. Return the result strictly in the following JSON format: 
 {
+  "rotation": number,
   "title": "string",
-  "description": "string",
-  "price": "string",
-  "categoryId": "string",
   "brand": "string",
-  "item_specifics": [{"name": "string", "value": "string"}],
-  "debug": "string"
-}`.trim();
+  "suggested_price": number,
+  "item_specifics": { "key": "value" }
+}
+Note: If the image is already upright, rotation must be 0. Do not guess; if the orientation is ambiguous, return 0.`.trim();
 
 async function imageUrlToInlineData(imgStr: string) {
   let finalUrl = imgStr;
@@ -110,18 +93,39 @@ export async function POST(req: NextRequest) {
 
     const listing = JSON.parse(responseText.replace(/```json|```/g, "").trim());
 
-    // Helper to find specific values in the array Gemini returns
-    const findSpec = (name: string) => 
-      listing.item_specifics?.find((s: any) => s.name.toLowerCase() === name.toLowerCase())?.value;
+    // Helper to find specific values if item_specifics is an array or object
+    const findSpec = (name: string) => {
+      if (!listing.item_specifics) return undefined;
+      if (Array.isArray(listing.item_specifics)) {
+        return listing.item_specifics.find((s: any) => s.name.toLowerCase() === name.toLowerCase())?.value;
+      }
+      return listing.item_specifics[name] || listing.item_specifics[name.toLowerCase()];
+    };
 
-    // Flatten the critical fields for the UI/CSV
+    // Auto-apply rotation to Cloudinary image URLs if rotation is non-zero
+    let finalPhotos = [...photos];
+    const rot = Number(listing.rotation) || 0;
+    if (rot > 0) {
+      finalPhotos = finalPhotos.map(url => {
+        if (typeof url === 'string' && url.includes("cloudinary.com")) {
+          return url.replace("/upload/", `/upload/a_${rot}/`);
+        }
+        return url;
+      });
+    }
+
+    const priceVal = listing.suggested_price || listing.price || "19.99";
+
+    // Flatten critical fields
     const refinedListing = {
       ...listing,
+      price: String(priceVal),
       brand: listing.brand || findSpec("Brand") || "Unbranded",
       size: listing.size || findSpec("Size") || "N/A",
       color: listing.color || findSpec("Color") || "Multi-Color",
       category: listing.category || "Collectibles > Non-Sport Trading Cards",
       categoryId: listing.categoryId || "183050",
+      rotation: rot,
     };
 
     // Generate a valid UUID so PostgreSQL (22P02) doesn't crash
@@ -129,8 +133,8 @@ export async function POST(req: NextRequest) {
 
     const coverIdx = listing.cover_photo_index ?? 0;
     const orderedPhotos = [
-      photos[coverIdx] || photos[0],
-      ...photos.filter((_: any, i: number) => i !== coverIdx)
+      finalPhotos[coverIdx] || finalPhotos[0],
+      ...finalPhotos.filter((_: any, i: number) => i !== coverIdx)
     ];
 
     return NextResponse.json({
@@ -138,7 +142,7 @@ export async function POST(req: NextRequest) {
       id: validId,
       photos: orderedPhotos,
       model_debug: modelUsed,
-      v: 21
+      v: 22
     });
 
   } catch (error: any) {
