@@ -27,13 +27,15 @@ export default function ListingReview({
 }: ListingReviewProps) {
   const [showPreview, setShowPreview] = useState(false);
 
+  console.log("Frank Debug - Current Item Specifics:", item.item_specifics);
+
   // Helper to normalize item_specifics as key-value pairs
   const getSpecificsEntries = (): [string, string][] => {
     if (!item.item_specifics) return [];
     if (Array.isArray(item.item_specifics)) {
       return item.item_specifics.map((s: any) => [
         s.name || s.key || "Property",
-        s.value || "",
+        String(s.value ?? ""),
       ]);
     }
     if (typeof item.item_specifics === "object") {

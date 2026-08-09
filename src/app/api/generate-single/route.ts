@@ -106,14 +106,41 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // Helper to find specific values if item_specifics is an array or object
-    const findSpec = (name: string) => {
-      if (!listing.item_specifics) return undefined;
-      if (Array.isArray(listing.item_specifics)) {
-        return listing.item_specifics.find((s: any) => s.name.toLowerCase() === name.toLowerCase())?.value;
-      }
-      return listing.item_specifics[name] || listing.item_specifics[name.toLowerCase()];
+    // FORCE CATEGORY ID MAPPING (Common Reseller Categories)
+    const categoryMap: Record<string, string> = {
+      "toddler": "51959",
+      "shirt": "51959",
+      "trading card": "183050",
+      "collectible": "1",
+      "toy": "220"
     };
+
+    const rawCategory = listing.category || listing.category_suggestion || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops";
+    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : String(rawCategory);
+
+    let finalCategoryId = String(listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "") || "");
+    if (!finalCategoryId || finalCategoryId === "undefined") {
+      const catLower = finalCategory.toLowerCase();
+      Object.keys(categoryMap).forEach(key => {
+        if (catLower.includes(key)) finalCategoryId = categoryMap[key];
+      });
+      if (!finalCategoryId) finalCategoryId = "51959";
+    }
+
+    // ENSURE SPECIFICS ARE FLAT
+    const rawSpecs = listing.item_specifics || listing.specifics || {};
+    const cleanSpecs = Array.isArray(rawSpecs)
+      ? rawSpecs.reduce((acc: any, spec: any) => {
+          if (spec?.name) acc[spec.name] = String(spec.value ?? "");
+          return acc;
+        }, {})
+      : Object.entries(rawSpecs).reduce((acc: any, [k, v]) => {
+          acc[k] = String(v ?? "");
+          return acc;
+        }, {});
+
+    // Helper to find specific values
+    const findSpec = (name: string) => cleanSpecs[name] || cleanSpecs[name.toLowerCase()];
 
     // Auto-apply rotation to Cloudinary image URLs if rotation is non-zero
     let finalPhotos = [...photos];
@@ -128,19 +155,7 @@ export async function POST(req: NextRequest) {
     }
 
     const priceVal = listing.suggested_price || listing.price || "19.99";
-
-    // Ensure critical fields aren't null
     const finalTitle = listing.title || "Toddler Clothing Lot";
-    const rawCategory = listing.category || listing.category_suggestion || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops";
-    const finalCategory = typeof rawCategory === 'object' ? (rawCategory.breadcrumb || rawCategory.name || "Clothing, Shoes & Accessories > Baby > Toddler Clothing > Tops") : String(rawCategory);
-    let rawCatId = listing.categoryId || listing.category_id || (typeof rawCategory === 'object' ? rawCategory.id : "");
-
-    if (finalCategory.toLowerCase().includes("toddler") || finalCategory.toLowerCase().includes("baby")) {
-      if (!rawCatId || rawCatId === "") {
-        rawCatId = "51959"; // Toddler Tops ID
-      }
-    }
-    const finalCategoryId = String(rawCatId || "51959");
 
     const refinedListing = {
       ...listing,
@@ -170,6 +185,7 @@ export async function POST(req: NextRequest) {
       title: finalTitle,
       category: finalCategory,
       categoryId: finalCategoryId,
+      item_specifics: cleanSpecs, // Explicitly pass the flattened object
       photos: orderedPhotos,
       model_debug: modelUsed + " | " + rawText.substring(0, 100),
       v: 29
